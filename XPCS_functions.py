@@ -7,7 +7,9 @@ import numpy as np
 from sklearn.metrics import r2_score
 import warnings
 from scipy.optimize import curve_fit
+from scipy.stats import pearsonr
 import os
+import matplotlib.colors as mcolors
 
 # Function to select synchrotron
 def select_synchrotron():
@@ -17,7 +19,6 @@ def select_synchrotron():
     Returns:
         str: The selected synchrotron.
     """
-
     # Initialize the synchrotron variable
     synchrotron = None
 
@@ -69,7 +70,6 @@ def select_directory():
     Returns:
         str: The selected directory path.
     """
-    
     # Initialize the QtPy application
     app = QApplication([])
 
@@ -163,11 +163,39 @@ def process_multi_tau_aps(hdf):
     """
     return None
 
+# Function to create a custom cmap
+def custom_cmap():
+    """
+    Create a custom colormap based on "gist_rainbow" but without yellow tones.
+    
+    Returns:
+        ListedColormap: A custom colormap without yellow tones.
+    """
+    # Get the gist_rainbow colormap
+    cmap = plt.get_cmap('gist_rainbow')
+
+    def is_yellow(color):
+        # Define a range of RGB values that correspond to yellow
+        yellow_lower = np.array([1.0, 0.8, 0.0])
+        yellow_upper = np.array([1.0, 1.0, 0.5])
+        r, g, b, _ = color  # Extract the RGB values
+        # Check if the color is within the defined yellow range
+        return (yellow_lower <= [r, g, b]).all() and ([r, g, b] <= yellow_upper).all()
+
+    # Create a new custom colormap by filtering out yellow tones
+    filtered_colors = [color for color in cmap(np.linspace(0, 1, 256)) if not is_yellow(color)]
+    custom_cmap = mcolors.ListedColormap(filtered_colors)
+
+    return custom_cmap
+
 # Function to initialize a plot
-def initialize_plot():
+def initialize_plot(q_len):
     """
     Initialize a matplotlib plot with specified LaTeX font and other settings.
-    
+
+    Args:
+        q_len (int): The length of the 'i_values' list for determining the color map size.
+
     Returns:
         tuple: A tuple containing figure, axes, color map, and a dictionary of lists for organizing data.
                The dictionary keys include:
@@ -179,11 +207,22 @@ def initialize_plot():
     #plt.rcParams["text.usetex"] = True
     #plt.rcParams["text.latex.preamble"] = r'\usepackage{amsmath} \usepackage{amssymb} \usepackage{fontspec} \setmainfont{Cambria Math}'
     
-    # Create a new figure for each HDF5 file
-    fig, (ax_single, ax_stretched) = plt.subplots(1, 2, figsize=(20, 8))
+    # Create a new figure for each HDF5 file with a 2x2 subplot grid
+    fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(20, 16))
 
+    # Access individual subplots using the axes array
+    ax_single = axes[0, 0]
+    ax_stretched = axes[0, 1]
+    ax_linear = axes[1, 0]
+    #ax3.axis('off') 
+    ax4 = axes[1, 1]
+    ax4.axis('off')
+    
     # Initialize a color map for different q values
-    cmap = plt.get_cmap('tab10')
+    #cmap = custom_cmap()
+    #cmap = plt.get_cmap('tab10')
+    cmap = plt.cm.get_cmap('gist_rainbow', q_len)
+    #cmap = plt.cm.get_cmap('turbo', q_len)
 
     # Initialize a dictionary to store lines and labels for legend items
     lines_labels_dict = {
@@ -197,7 +236,7 @@ def initialize_plot():
         "fit_labels_stretched": []  # Labels for fitted curves for Stretched Exponential
     }
     
-    return fig, ax_single, ax_stretched, cmap, lines_labels_dict
+    return fig, ax_single, ax_stretched, ax_linear, cmap, lines_labels_dict
 
 # Function to fit a given model to the data and return parameters, fitted curve, and R2 score
 def fit_model(t, g2, model_func, initial_params):
@@ -255,6 +294,42 @@ def stretched_exponential(t, A, B, C, gamma):
         array-like: The fitted curve.
     """
     return A + B * np.exp(-2 * C * t) ** gamma
+
+# Define the function that will perform the linear fit and return the parameters
+def fit_linear_model(q_squared_values, C_values):
+    """
+    Fit a linear model C = D * q^2 to given data.
+    
+    Parameters:
+    q_squared_values (array-like): Array of q^2 values.
+    C_values (array-like): Array of corresponding relaxation rates.
+    
+    Returns:
+    D (float): Diffusion coefficient obtained from the linear fit.
+    pearson_r (float): Pearson correlation coefficient of the fit.
+    """
+    # Convert q_squared_values to float values
+    q_squared_values = np.array(q_squared_values, dtype=np.float64)
+    
+    # Define the linear function to fit
+    def linear_function(q_squared, D):
+        return D * q_squared + 0  # Force y-intercept to be zero
+
+    try:
+       # Perform the linear fit
+       fit_params, cov_matrix = curve_fit(linear_function, q_squared_values, C_values)
+       
+       # Get the parameter D (slope of the linear fit)
+       D = fit_params[0]
+       
+       # Calculate the Pearson correlation coefficient
+       pearson_r, _ = pearsonr(C_values, linear_function(q_squared_values, D))
+       
+       return D, pearson_r
+   
+    except (RuntimeError, ValueError):
+        # Handle fitting errors, e.g., NaN or infinite values
+        return np.nan, np.nan
 
 # Function to calculate relaxation time and diffusion coefficient
 def calculate_relaxation_and_diffusion(params, q_value):
@@ -384,7 +459,7 @@ def configure_subplot(ax, title, xlabel, ylabel, exp_lines, exp_labels, fit_line
     ax.set_ylabel(ylabel)
 
     # Create the legend for experimental data
-    legend_exp = ax.legend(exp_lines, exp_labels, loc='upper right', bbox_to_anchor=(0.87, 1), borderaxespad=0)
+    legend_exp = ax.legend(exp_lines, exp_labels, loc='upper right', bbox_to_anchor=(0.86, 1), borderaxespad=0)
     ax.add_artist(legend_exp)
 
     # Create the legend for fitted curves
@@ -501,4 +576,3 @@ def generate_fit_results_tables2(directory, table_data_single, table_data_stretc
 
     print("Fit results tables generated successfully.")
 
-    
