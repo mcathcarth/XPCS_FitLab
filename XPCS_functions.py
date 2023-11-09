@@ -1,11 +1,13 @@
 import tkinter as tk
-from qtpy.QtWidgets import QApplication, QFileDialog
+from tkinter import filedialog
+from qtpy.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QFileDialog
 import sys
 import h5py
 import pandas as pd
 import re
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 from scipy.optimize import curve_fit
 from sklearn.metrics import r2_score
 import warnings
@@ -72,7 +74,7 @@ def select_synchrotron():
     return synchrotron
 
 # Function to select a directory
-def select_directory():
+def select_dir():
     """
     Displays a GUI window to select a directory and returns the selected directory path.
     
@@ -91,6 +93,59 @@ def select_directory():
         sys.exit()
 
     return directory
+
+# Function to select a directory or files
+def select_directory_or_files():
+    """
+    Displays a GUI window to select a directory or individual files and returns the selected directory path and list of files.
+
+    Returns:
+        str: The selected directory path.
+        list: List of selected files.
+    """
+    app = QApplication([])
+
+    layout = QVBoxLayout()
+
+    directory_button = QPushButton("Select Directory")
+    files_button = QPushButton("Select Files")
+
+    directory_path = ""
+    selected_files = []
+
+    def select_directory():
+        nonlocal directory_path
+        directory_path = QFileDialog.getExistingDirectory(None, "Select Directory")
+        # Close the window after the user has made a selection
+        window.close()
+
+    def select_files():
+        nonlocal selected_files, directory_path
+        directory_path = os.path.dirname(QFileDialog.getOpenFileName(None, "Select Files", "", "HDF5 Files (*.hdf5);;All Files (*)")[0])
+        # Close the window after the user has made a selection
+        window.close()
+        
+        # Extract only the filenames (without the path) from the selected file paths
+        selected_file_paths, _ = QFileDialog.getOpenFileNames(None, "Select Files", "", "HDF5 Files (*.hdf5);;All Files (*)")
+        selected_files = [os.path.basename(file_path) for file_path in selected_file_paths]
+
+    directory_button.clicked.connect(select_directory)
+    files_button.clicked.connect(select_files)
+
+    layout.addWidget(directory_button)
+    layout.addWidget(files_button)
+
+    window = QWidget()
+    window.setLayout(layout)
+    window.show()
+
+    app.exec_()
+
+    if directory_path and not selected_files:
+        # If a directory was selected but no files were chosen, get the list of .hdf5 files in that directory
+        selected_files = [os.path.basename(file) for file in os.listdir(directory_path) if file.endswith('.hdf5')]
+
+    return directory_path, selected_files
 
 # Function to initialize error and success counters
 def initialize_error_and_success_counters():
@@ -330,58 +385,77 @@ def initialize_data_for_parameter_averages():
 # Function to initialize a plot
 def initialize_plot(q_len):
     """
-    Initialize a matplotlib plot with specified LaTeX font and other settings.
+    Initialize a Matplotlib figure with specific subplots layout for later data plotting.
 
     Args:
-        q_len (int): The length of the 'i_values' list for determining the color map size.
+        q_len (int): The number of curves to determine the colormap size.
 
     Returns:
-        tuple: A tuple containing figure, axes, color map, and a dictionary of lists for organizing data.
-               The dictionary keys include:
-               - 'exp_lines_single', 'exp_labels_single', 
-                 'fit_lines_single', 'fit_labels_single'
-               - 'exp_lines_stretched', 'exp_labels_stretched', 
-                 'fit_lines_stretched', 'fit_labels_stretched'
-               - 'exp_lines_cumulants', 'exp_labels_cumulants', 
-                 'fit_lines_cumulants', 'fit_labels_cumulants'
+        tuple: A tuple containing two figures with their respective subplots, a colormap, and a dictionary to organize legend lines and labels.
     """
-    
-    # Configure LaTeX font with Cambria Math
-    #plt.rcParams["text.usetex"] = True
-    #plt.rcParams["text.latex.preamble"] = r'\usepackage{amsmath} \usepackage{amssymb} \usepackage{fontspec} \setmainfont{Cambria Math}'
-    
-    # Create a new figure for each HDF5 file with a 2x2 subplot grid
-    fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(20, 16))
+    # Create a new figure for each HDF5 file with a 3x2 subplot grid
+    fig1 = plt.figure(figsize=(20, 16))
+    axs1 = fig1.subplots(2, 3)
 
-    # Access individual subplots using the axes array
-    ax_single = axes[0, 0]
-    ax_stretched = axes[0, 1]
-    ax_cumulants = axes[1, 0]  # New axis for the Cumulants model
-    ax_linear = axes[1, 1]
-    
+    fig2 = plt.figure(figsize=(20, 16))
+    axs2 = fig2.subplots(2, 3)
+
+    # Set titles for each row of subplots
+    #fig1.suptitle("Page 1", fontsize=16)
+    #fig2.suptitle("Page 2", fontsize=16)
+
+    # Set titles for each row of subplots
+    fig1.text(0.5, 0.975, "Correlation function fitting", fontsize=18, ha='center', va='center')
+    fig1.text(0.5, 0.475, "Single exponential", fontsize=18, ha='center', va='center')
+
+    fig2.text(0.5, 0.975, "Stretched exponential", fontsize=18, ha='center', va='center')
+    fig2.text(0.5, 0.475, "Cumulants model", fontsize=18, ha='center', va='center')
+
+    # Access individual subplots on the first page
+    ax_single = axs1[0, 0]
+    ax_stretched = axs1[0, 1]
+    ax_cumulants = axs1[0, 2]
+    ax_Cq2_si = axs1[1, 0]
+    ax_Cq_si = axs1[1, 1]
+    ax_si = axs1[1, 2]
+    ax_si.axis('off')
+
+    # Access individual subplots on the second page
+    ax_Cq2_st = axs2[0, 0]
+    ax_Cq_st = axs2[0, 1]
+    ax_gammaq = axs2[0, 2]
+    ax_Cq2_cu = axs2[1, 0]
+    ax_Cq_cu = axs2[1, 1]
+    ax_PDIq = axs2[1, 2]
+
+    # Set aspect ratio to 'equal' for square plots
+    for ax in [ax_single, ax_stretched, ax_cumulants, ax_Cq2_si, ax_Cq_si, ax_Cq2_st, ax_Cq_st, ax_gammaq, ax_Cq2_cu, ax_Cq_cu, ax_PDIq]:
+        ax.set_box_aspect(1)
+
+    # Adjust subplot parameters to reduce margins
+    fig1.subplots_adjust(left=0.05, right=0.95, top=0.95, bottom=0.05, wspace=0.25, hspace=0.25)
+    fig2.subplots_adjust(left=0.05, right=0.95, top=0.95, bottom=0.05, wspace=0.25, hspace=0.25)
+
     # Initialize a color map for different q values
-    #cmap = custom_cmap()
-    #cmap = plt.get_cmap('tab10')
     cmap = plt.cm.get_cmap('gist_rainbow', q_len)
-    #cmap = plt.cm.get_cmap('turbo', q_len)
 
     # Initialize a dictionary to store lines and labels for legend items
     lines_labels_dict = {
-        "exp_lines_single": [],    # Lines for experimental data for Single Exponential
-        "exp_labels_single": [],   # Labels for experimental data for Single Exponential
-        "fit_lines_single": [],    # Lines for fitted curves for Single Exponential
-        "fit_labels_single": [],   # Labels for fitted curves for Single Exponential
-        "exp_lines_stretched": [],  # Lines for experimental data for Stretched Exponential
-        "exp_labels_stretched": [], # Labels for experimental data for Stretched Exponential
-        "fit_lines_stretched": [],  # Lines for fitted curves for Stretched Exponential
-        "fit_labels_stretched": [],  # Labels for fitted curves for Stretched Exponential
-        "exp_lines_cumulants": [],  # Lines for experimental data for Cumulants
-        "exp_labels_cumulants": [],  # Labels for experimental data for Cumulants
-        "fit_lines_cumulants": [],  # Lines for fitted curves for Cumulants
-        "fit_labels_cumulants": []  # Labels for fitted curves for Cumulants
+        "exp_lines_single": [],
+        "exp_labels_single": [],
+        "fit_lines_single": [],
+        "fit_labels_single": [],
+        "exp_lines_stretched": [],
+        "exp_labels_stretched": [],
+        "fit_lines_stretched": [],
+        "fit_labels_stretched": [],
+        "exp_lines_cumulants": [],
+        "exp_labels_cumulants": [],
+        "fit_lines_cumulants": [],
+        "fit_labels_cumulants": [],
     }
-    
-    return fig, ax_single, ax_stretched, ax_cumulants, ax_linear, cmap, lines_labels_dict
+
+    return fig1, (ax_single, ax_stretched, ax_cumulants, ax_Cq2_si, ax_Cq_si), fig2, (ax_Cq2_st, ax_Cq_st, ax_gammaq, ax_Cq2_cu, ax_Cq_cu, ax_PDIq), cmap, lines_labels_dict
 
 # Function to initialize empty data structures for derived parameters
 def initialize_data_for_derived_params():
@@ -395,8 +469,13 @@ def initialize_data_for_derived_params():
     """
     # Initialize empty lists for relax_rate vs q^2 values
     derived_params = {
-        "q_square": [],   # Empty list for q_square model values
-        "relax_rate": [],  # Empty list for relax_rate model values
+        "q_value": [],
+        "q_square": [],   
+        "relax_rate_single": [],
+        "relax_rate_stretched": [],
+        "gamma": [],  
+        "relax_rate_cumulants": [],
+        "PDI": []
     }
         
     return derived_params
@@ -686,6 +765,154 @@ def fit_linear_model(q_squared_values, C_values):
         # Handle fitting errors, e.g., NaN or infinite values
         return np.nan, np.nan
     
+# Define the function that will perform the exponential fit and return the parameters
+def fit_exponential_model(q_values, C_values):
+    """
+    Fit an exponential model C = D * q^n to given data.
+
+    Parameters:
+    q_values (array-like): Array of q values.
+    C_values (array-like): Array of corresponding relaxation rates.
+
+    Returns:
+    D (float): Diffusion coefficient obtained from the exponential fit.
+    n (float): Exponent obtained from the exponential fit.
+    r2_score (float): Coefficient of determination (R^2) for the fit.
+    """
+    # Convert q_values and C_values to float values
+    q_values = np.array(q_values, dtype=np.float64)
+    C_values = np.array(C_values, dtype=np.float64)
+
+    # Define the exponential function to fit
+    def exponential_function(q, D, n):
+        return D * q**n
+
+    try:
+        # Perform the exponential fit
+        fit_params, cov_matrix = curve_fit(exponential_function, q_values, C_values)
+
+        # Get the parameters D and n
+        D = fit_params[0]
+        n = fit_params[1]
+        #D, n = params
+        
+        # Calculate the predicted values
+        predicted_values = D * q_values**n
+
+        # Calculate the R^2 score
+        r2 = r2_score(C_values, predicted_values)
+
+        return D, n, r2
+
+    except (RuntimeError, ValueError):
+        # Handle fitting errors, e.g., NaN or infinite values
+        return np.nan, np.nan, np.nan
+
+# Define the function to fit and plot a specified model
+def fit_and_plot_model(x_values, relax_rate_values, ax, cmap, label, model_type='linear'):
+    """
+    Fit a model to given data and generate a plot on a specified subplot
+
+    Args:
+        x_values (array-like): Array of q2 or q values.
+        relax_rate_values (array-like): Array of corresponding relaxation rates.
+        ax (matplotlib.axes.Axes): The subplot where the plot will be generated.
+        cmap (matplotlib.colors.Colormap): Colormap for line colors.
+        label (str): Label for the plot
+        model_type (str, optional): Type of model to fit. Supported values are 'linear' or 'exponential'. Defaults to 'linear'.
+
+    Returns:
+        D (float): Diffusion coefficient obtained from the fit.
+        n (float): Exponent obtained from the fit (applicable for exponential model).
+        r_metric (float): Metric (e.g., Pearson correlation coefficient or R-squared) indicating the quality of the fit.
+    """
+    try:
+        if model_type == 'linear':
+            # Call the function to perform the linear fit
+            D, r_metric = fit_linear_model(x_values, relax_rate_values)
+            n = np.nan  # For consistency, set n to NaN for linear fits
+        elif model_type == 'exponential':
+            # Call the function to perform the exponential fit
+            D, n, r_metric = fit_exponential_model(x_values, relax_rate_values)
+        else:
+            raise ValueError("Invalid model_type. Supported values are 'linear' or 'exponential'.")
+
+        # Create a color palette with the number of points
+        n_points = len(x_values)
+
+        # Plot the model data
+        for i in range(n_points):
+            color = cmap(i)
+            
+            line_data = ax.plot(x_values[i], relax_rate_values[i], 'o', color=color, markersize=10, label="")[0]
+
+        # Define the exponential function for fitting
+        def exponential_function(q, D, n):
+            return D * q**n
+
+        # Generate the fit line using the fitted values of D and n
+        if model_type == 'linear':
+            q_fit = np.linspace(0, max(x_values), 100)
+            fit_line = D * q_fit
+        elif model_type == 'exponential':
+            #q_fit = np.linspace(min(x_values), max(x_values), 1000)
+            q_fit = np.linspace(min(x_values), max(x_values), 100)
+            fit_line = exponential_function(q_fit, D, n)
+        else:
+            fit_line = None
+
+        # Plot the fit line
+        ax.plot(q_fit, fit_line, linestyle='-', color='black', label=f"{model_type.capitalize()} Fit")
+
+        # Set the axes to start from zero
+        ax.set_xlim(0, (max(x_values) + 0.1 * max(x_values)))
+        ax.set_ylim(0, max(relax_rate_values) * 1.1)
+        #ax.set_ylim(0, (max(relax_rate_values) + 0.1 * max(relax_rate_values)))
+
+        return D, n, r_metric
+
+    except ValueError as e:
+        print(f"Error fitting and plotting the {model_type} model: {e}")
+        return np.nan, np.nan, np.nan
+
+# Define the function to plot a specified param
+def plot_params(q_values, y_values, ax, cmap, param_type):
+    """
+    Plot points of a derived param on a specified subplot.
+
+    Args:
+        q_values (array-like): Array of q values.
+        y_values (array-like): Array of param values (gamma or PDI).
+        ax (matplotlib.axes.Axes): The subplot where the plot will be generated.
+        cmap (matplotlib.colors.Colormap): Colormap for point colors.
+        param_type (str): Type of parameter ('gamma' or 'PDI').
+
+    Returns:
+        None
+    """
+    try:
+        # Create a color palette with the number of points
+        n_points = len(q_values)
+
+        # Plot the data points with labels
+        for i in range(n_points):
+            color = cmap(i)
+            ax.plot(q_values[i], y_values[i], 'o', color=color, markersize=10)
+
+        # Set y-axis limits with a margin
+        if param_type.lower() == 'gamma':
+            y_min = np.min(y_values) - 0.01
+            y_max = np.max(y_values) + 0.01
+            ax.set_ylim(y_min, y_max)
+        
+        # Set y-axis limits with a small margin
+        elif param_type.lower() == 'pdi':
+            y_margin = 0.1 * (max(y_values) - min(y_values))
+            ax.set_ylim(min(y_values) - y_margin, max(y_values) + y_margin)
+
+    except ValueError as e:
+        print(f"Error plotting points: {e}")
+        
 # Configure subplot with title, labels, experimental data legend, and fitted curves legend
 def configure_subplot(ax, title, xlabel, ylabel, exp_lines, exp_labels, fit_lines, fit_labels):
     """
@@ -708,12 +935,19 @@ def configure_subplot(ax, title, xlabel, ylabel, exp_lines, exp_labels, fit_line
     ax.set_ylabel(ylabel.replace("Beta", "β"), fontsize=14)
 
     # Create the legend for experimental data
-    legend_exp = ax.legend(exp_lines, exp_labels, loc='upper right', bbox_to_anchor=(0.86, 1), borderaxespad=0)
-    ax.add_artist(legend_exp)
+    #legend_exp = ax.legend(exp_lines, exp_labels, loc='upper right', bbox_to_anchor=(0.86, 1), borderaxespad=0)
+    #ax.add_artist(legend_exp)
 
     # Create the legend for fitted curves
-    legend_fit = ax.legend(fit_lines, fit_labels, loc='upper right', bbox_to_anchor=(1, 1), borderaxespad=0)
-    ax.add_artist(legend_fit)
+    #legend_fit = ax.legend(fit_lines, fit_labels, loc='upper right', bbox_to_anchor=(1, 1), borderaxespad=0)
+    #ax.add_artist(legend_fit)
+
+    # Combine q and R values
+    combined_labels = [f"{exp_label} - {fit_label}" for exp_label, fit_label in zip(exp_labels, fit_labels)]
+
+    # Create the legend for experimental data
+    legend_exp = ax.legend(exp_lines, combined_labels, loc='upper right', bbox_to_anchor=(1, 1), borderaxespad=0)
+    ax.add_artist(legend_exp)
 
 # Function to calculate average parameter values
 def calculate_average_parameter_values(param_dict, model):
@@ -759,7 +993,27 @@ def calculate_average_parameter_values(param_dict, model):
             average_parameters['PDI std'] = pdi_std
 
     return average_parameters
-            
+
+# Function to calculate the text position
+def calculate_text_position(q_count):
+    """
+    Calculate text positions based on q_count.
+
+    Parameters:
+        q_count (int): The value of q_count.
+
+    Returns:
+        float: The text position for Diff Coef.
+    """
+    # Ajusta estos valores según la relación deseada
+    slope = -0.043
+    intercept = 1.0
+
+    # Calcula la posición de diff_coef
+    diff_coef_position = slope * q_count + intercept
+
+    return diff_coef_position
+
 # Function to print error and success counters
 def print_summary(counters):
     """
