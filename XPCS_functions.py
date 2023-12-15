@@ -1,6 +1,7 @@
 import tkinter as tk
-from tkinter import filedialog
-from qtpy.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QFileDialog
+from tkinter import filedialog, messagebox, simpledialog, ttk
+from PyQt5.QtWidgets import QApplication, QFileDialog, QWidget, QVBoxLayout, QPushButton, QDesktopWidget
+import os
 import sys
 import h5py
 import pandas as pd
@@ -12,7 +13,6 @@ from scipy.optimize import curve_fit
 from sklearn.metrics import r2_score
 import warnings
 from scipy.stats import pearsonr
-import os
 
 # Function to select synchrotron
 def select_synchrotron():
@@ -41,6 +41,11 @@ def select_synchrotron():
         synchrotron = 'APS'
         root.destroy()
 
+    def set_ESRF():
+        nonlocal synchrotron
+        synchrotron = 'ESRF'
+        root.destroy()
+
     # Set synchrotron to None when the window is closed
     def on_closing():
         nonlocal synchrotron
@@ -51,6 +56,16 @@ def select_synchrotron():
     root = tk.Tk()
     root.title("Select Synchrotron")    # Set the title of the window
 
+    # Set the window size and position it in the center of the screen
+    window_width = 300
+    window_height = 200
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    x_position = (screen_width - window_width) // 2
+    y_position = (screen_height - window_height) // 2
+
+    root.geometry(f"{window_width}x{window_height}+{x_position}+{y_position}")
+    
     # Create a label widget to display the instruction
     label = tk.Label(root, text="Select the synchrotron:")
     label.pack(pady=10)                 # Add some padding
@@ -65,6 +80,9 @@ def select_synchrotron():
     APS_button = tk.Button(root, text="APS", command=set_APS)
     APS_button.pack(pady=5)
 
+    ESRF_button = tk.Button(root, text="ESRF", command=set_ESRF)
+    ESRF_button.pack(pady=5)
+
     # Bind the closing of the window to the on_closing function
     root.protocol("WM_DELETE_WINDOW", on_closing)
     
@@ -72,27 +90,6 @@ def select_synchrotron():
     root.mainloop()
     
     return synchrotron
-
-# Function to select a directory
-def select_dir():
-    """
-    Displays a GUI window to select a directory and returns the selected directory path.
-    
-    Returns:
-        str: The selected directory path.
-    """
-    # Initialize the QtPy application
-    app = QApplication([])
-
-    # Prompt for directory if not defined
-    directory = QFileDialog.getExistingDirectory(None, "Select directory")
-
-    # Exit if no directory is selected
-    if not directory:
-        print("No directory selected.")
-        sys.exit()
-
-    return directory
 
 # Function to select a directory or files
 def select_directory_or_files():
@@ -137,6 +134,18 @@ def select_directory_or_files():
 
     window = QWidget()
     window.setLayout(layout)
+
+    # Set the window size and position it in the center of the screen
+    window_width = 300
+    window_height = 100
+    screen_geometry = QDesktopWidget().screenGeometry()
+    x_position = (screen_geometry.width() - window_width) // 2
+    y_position = (screen_geometry.height() - window_height) // 2
+
+    window.setGeometry(x_position, y_position, window_width, window_height)
+
+    # Set the window title
+    window.setWindowTitle("Select Directory or Files")
     window.show()
 
     app.exec_()
@@ -147,6 +156,22 @@ def select_directory_or_files():
 
     return directory_path, selected_files
 
+# Function to prompt the user for defining the range
+def ask_user_for_t_range():
+    """
+    Ask the user if they want to define the range of 't'.
+
+    Returns:
+        bool: True if the user chooses 'Yes', False otherwise.
+    """
+    root = tk.Tk()
+    root.withdraw()
+
+    # Ask the user if they want to define the range
+    user_response = messagebox.askyesno("Define Range", "Do you want to define the range of 't'?")
+
+    return user_response
+    
 # Function to initialize error and success counters
 def initialize_error_and_success_counters():
     """
@@ -187,6 +212,8 @@ def generate_base_name(selected_synchrotron, hdf5_file):
         base_name = '_'.join(var[:-3])+'_'+n
     elif selected_synchrotron == 'APS':
         base_name = hdf5_file.replace('.hdf5', '')
+    elif selected_synchrotron == 'ESRF':
+        base_name = hdf5_file.replace('.h5', '')
 
     return base_name
 
@@ -350,6 +377,131 @@ def process_aps_data(file_path):
         pd.DataFrame: A DataFrame with columns 't' and 'g2(q=X)' for different 'q' values.
     """
     return pd.DataFrame()
+
+# Function to process data from ESRF
+def process_esrf_data(file_path):
+    """
+    Process data from an HDF5 file of 'ESRF' and generate a DataFrame with columns 't' and 'g2(q=X)'.
+
+    Args:
+        file_path (str): The path to the HDF5 file.
+
+    Returns:
+        pd.DataFrame: A DataFrame with columns 't' and 'g2(q=X)' for different 'q' values.
+    """
+    try:
+        with h5py.File(file_path, 'r') as hdf:
+            # Navigate to the relevant directories
+            entry_group = hdf['entry_0000']
+            dynamix_group = entry_group['dynamix']
+            correlations_group = dynamix_group['correlations']
+            directions_group = correlations_group['directions']
+            direction_group = directions_group['direction_0000']
+            correlation_group = direction_group['correlation']
+
+            # Get 't' data from the 'timeshift' file (assuming a single column)
+            t_data = correlation_group['timeshift'][:, 0]
+
+            # Initialize an empty DataFrame with 't' as the first column
+            combined_df = pd.DataFrame({'# t': t_data})
+
+            # Get 'q' values from the 'q_index_min_max' file
+            q_index_min_max = correlations_group['q_index_min_max'][:]
+            q_values = q_index_min_max[:, 1:3].mean(axis=1)
+
+            # Add 'g2' data for each 'q' to the DataFrame
+            for i, q_value in enumerate(q_values):
+                g2_data = correlation_group['cf'][:, i]
+                combined_df[f'g2(q={q_value})'] = g2_data
+
+        return combined_df
+    
+    except (OSError, KeyError) as e:
+        error_message = f"### Error ###:\nThere is an issue with the data structure in the file.\n{e}"
+        print(error_message)
+        return None
+
+# Function to get de t range
+def get_t_range_slider(t_values):
+    """
+    Display a centered GUI window for the user to select a range for 't' using sliders.
+
+    Args:
+        t_values (list): List of 't' values.
+
+    Returns:
+        tuple: Lower and upper limits of the selected range.
+    """
+    def apply_range():
+        nonlocal lower_limit, upper_limit
+        lower_limit = int(lower_slider.get())
+        upper_limit = int(upper_slider.get())
+
+        if lower_limit > upper_limit:
+            messagebox.showerror("Error", "Lower limit must be less than or equal to the upper limit.")
+        else:
+            range_dialog.destroy()
+
+    def on_arrow_key_press(event):
+        """
+        Move the slider position by one when arrow keys are pressed.
+        """
+        if event.keysym == 'Left':
+            lower_slider.set(lower_slider.get() - 1)
+        elif event.keysym == 'Right':
+            lower_slider.set(lower_slider.get() + 1)
+        elif event.keysym == 'Up':
+            upper_slider.set(upper_slider.get() + 1)
+        elif event.keysym == 'Down':
+            upper_slider.set(upper_slider.get() - 1)
+
+    range_dialog = tk.Toplevel()
+    range_dialog.title("Select 't' Range")
+
+    # Center the window on the screen
+    window_width = 400
+    window_height = 180
+    screen_width = range_dialog.winfo_screenwidth()
+    screen_height = range_dialog.winfo_screenheight()
+    x_position = (screen_width - window_width) // 2
+    y_position = (screen_height - window_height) // 2
+
+    range_dialog.geometry(f"{window_width}x{window_height}+{x_position}+{y_position}")
+
+    lower_limit = 0
+    upper_limit = len(t_values) - 1
+
+    # Create sliders for lower and upper limits with 't' values as labels
+    lower_slider = tk.Scale(range_dialog, from_=0, to=len(t_values) - 1, orient=tk.HORIZONTAL, label="◄ Lower Limit ►",
+                            length=300, showvalue=0, command=lambda x: lower_slider_label.config(text=f"{t_values[int(x)]:.4f}"))
+    lower_slider.set(lower_limit)
+    lower_slider.pack()
+
+    lower_slider_label = tk.Label(range_dialog, text=f"{t_values[lower_limit]:.4f}", width=10)
+    lower_slider_label.pack()
+
+    upper_slider = tk.Scale(range_dialog, from_=0, to=len(t_values) - 1, orient=tk.HORIZONTAL, label="▲ Upper Limit ▼",
+                            length=300, showvalue=0, command=lambda x: upper_slider_label.config(text=f"{t_values[int(x)]:.4f}"))
+    upper_slider.set(upper_limit)
+    upper_slider.pack()
+
+    upper_slider_label = tk.Label(range_dialog, text=f"{t_values[upper_limit]:.4f}", width=10)
+    upper_slider_label.pack()
+
+    # Create a button to apply the selected range
+    apply_button = tk.Button(range_dialog, text="Apply Range", command=apply_range)
+    apply_button.pack()
+
+    # Bind arrow key events to move the sliders
+    range_dialog.bind('<Left>', on_arrow_key_press)
+    range_dialog.bind('<Right>', on_arrow_key_press)
+    range_dialog.bind('<Up>', on_arrow_key_press)
+    range_dialog.bind('<Down>', on_arrow_key_press)
+
+    # Wait for the window to be closed
+    range_dialog.wait_window()
+
+    return lower_limit, upper_limit
 
 # Function to initialize R tracking for parameter averages
 def initialize_data_for_parameter_averages():
@@ -741,6 +893,7 @@ def fit_linear_model(q_squared_values, C_values):
     Returns:
     D (float): Diffusion coefficient obtained from the linear fit.
     pearson_r (float): Pearson correlation coefficient of the fit.
+    std_err (float): Standard error of the slope.
     """
     # Convert q_squared_values to float values
     q_squared_values = np.array(q_squared_values, dtype=np.float64)
@@ -758,12 +911,15 @@ def fit_linear_model(q_squared_values, C_values):
        
        # Calculate the Pearson correlation coefficient
        pearson_r, _ = pearsonr(C_values, linear_function(q_squared_values, D))
+
+       # Get the standard error of the slope
+       std_err = np.sqrt(np.diag(cov_matrix))[0]
        
-       return D, pearson_r
+       return D, pearson_r, std_err
    
     except (RuntimeError, ValueError):
         # Handle fitting errors, e.g., NaN or infinite values
-        return np.nan, np.nan
+        return np.nan, np.nan, np.nan
     
 # Define the function that will perform the exponential fit and return the parameters
 def fit_exponential_model(q_values, C_values):
@@ -778,6 +934,8 @@ def fit_exponential_model(q_values, C_values):
     D (float): Diffusion coefficient obtained from the exponential fit.
     n (float): Exponent obtained from the exponential fit.
     r2_score (float): Coefficient of determination (R^2) for the fit.
+    std_err_D (float): Standard error of the coefficient D.
+    std_err_n (float): Standard error of the exponent n.
     """
     # Convert q_values and C_values to float values
     q_values = np.array(q_values, dtype=np.float64)
@@ -802,11 +960,14 @@ def fit_exponential_model(q_values, C_values):
         # Calculate the R^2 score
         r2 = r2_score(C_values, predicted_values)
 
-        return D, n, r2
+        # Get the standard errors of D and n
+        std_err_D, std_err_n = np.sqrt(np.diag(cov_matrix))
+
+        return D, n, r2, std_err_D, std_err_n
 
     except (RuntimeError, ValueError):
         # Handle fitting errors, e.g., NaN or infinite values
-        return np.nan, np.nan, np.nan
+        return np.nan, np.nan, np.nan, np.nan, np.nan
 
 # Define the function to fit and plot a specified model
 def fit_and_plot_model(x_values, relax_rate_values, ax, cmap, label, model_type='linear'):
@@ -825,15 +986,17 @@ def fit_and_plot_model(x_values, relax_rate_values, ax, cmap, label, model_type=
         D (float): Diffusion coefficient obtained from the fit.
         n (float): Exponent obtained from the fit (applicable for exponential model).
         r_metric (float): Metric (e.g., Pearson correlation coefficient or R-squared) indicating the quality of the fit.
+        std_err (float): Standard error of the slope for linear fits. Tuple (std_err_D, std_err_n) for exponential fits.
     """
     try:
         if model_type == 'linear':
             # Call the function to perform the linear fit
-            D, r_metric = fit_linear_model(x_values, relax_rate_values)
+            D, r_metric, std_err = fit_linear_model(x_values, relax_rate_values)
             n = np.nan  # For consistency, set n to NaN for linear fits
         elif model_type == 'exponential':
             # Call the function to perform the exponential fit
-            D, n, r_metric = fit_exponential_model(x_values, relax_rate_values)
+            D, n, r_metric, std_err_D, std_err_n = fit_exponential_model(x_values, relax_rate_values)
+            std_err = (std_err_D, std_err_n)  # Standard error for exponential fits
         else:
             raise ValueError("Invalid model_type. Supported values are 'linear' or 'exponential'.")
 
@@ -844,7 +1007,7 @@ def fit_and_plot_model(x_values, relax_rate_values, ax, cmap, label, model_type=
         for i in range(n_points):
             color = cmap(i)
             
-            line_data = ax.plot(x_values[i], relax_rate_values[i], 'o', color=color, markersize=10, label="")[0]
+            line_data = ax.plot(x_values[i], relax_rate_values[i], 'o', color=color, markersize=10, label='')[0]
 
         # Define the exponential function for fitting
         def exponential_function(q, D, n):
@@ -862,18 +1025,27 @@ def fit_and_plot_model(x_values, relax_rate_values, ax, cmap, label, model_type=
             fit_line = None
 
         # Plot the fit line
-        ax.plot(q_fit, fit_line, linestyle='-', color='black', label=f"{model_type.capitalize()} Fit")
+        #ax.plot(q_fit, fit_line, linestyle='-', color='black', label=f"{model_type.capitalize()} Fit")
+        ax.plot(q_fit, fit_line, linestyle='-', color='black', label='')
+
+        # Remove the legend if it exists
+        legend = ax.get_legend()
+        if legend:
+            legend.remove()
 
         # Set the axes to start from zero
         ax.set_xlim(0, (max(x_values) + 0.1 * max(x_values)))
         ax.set_ylim(0, max(relax_rate_values) * 1.1)
         #ax.set_ylim(0, (max(relax_rate_values) + 0.1 * max(relax_rate_values)))
 
-        return D, n, r_metric
+        # Disable legend not found warning
+        warnings.resetwarnings()
+        
+        return D, n, r_metric, std_err
 
     except ValueError as e:
         print(f"Error fitting and plotting the {model_type} model: {e}")
-        return np.nan, np.nan, np.nan
+        return np.nan, np.nan, np.nan, np.nan
 
 # Define the function to plot a specified param
 def plot_params(q_values, y_values, ax, cmap, param_type):
@@ -1092,3 +1264,4 @@ def generate_fit_results_tables(directory, table_data_single, table_data_stretch
 
     print("Fit results tables generated successfully.")
 
+    
