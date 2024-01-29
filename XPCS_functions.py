@@ -1,18 +1,22 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter import Canvas, messagebox, ttk
 from PyQt5.QtWidgets import QApplication, QFileDialog, QWidget, QVBoxLayout, QPushButton, QDesktopWidget
 import os
-import sys
 import h5py
 import pandas as pd
 import re
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from scipy.optimize import curve_fit
 from sklearn.metrics import r2_score
 import warnings
 from scipy.stats import pearsonr
+
+#-----------------------------------------------------------------------#
+#--------------------- Directory and File Handling ---------------------#
+#-----------------------------------------------------------------------#
 
 # Function to select synchrotron
 def select_synchrotron():
@@ -110,21 +114,31 @@ def select_directory_or_files():
     directory_path = ""
     selected_files = []
 
+    # Function to select a directory
     def select_directory():
         nonlocal directory_path
         directory_path = QFileDialog.getExistingDirectory(None, "Select Directory")
         # Close the window after the user has made a selection
         window.close()
 
+    # Function to select specific files
     def select_files():
         nonlocal selected_files, directory_path
-        directory_path = os.path.dirname(QFileDialog.getOpenFileName(None, "Select Files", "", "HDF5 Files (*.hdf5);;All Files (*)")[0])
+        # Get the selected file paths
+        selected_file_paths, _ = QFileDialog.getOpenFileNames(None, "Select Files", "", "HDF5 Files (*.hdf5);;All Files (*)")
+
+        if not selected_file_paths:
+            # If no files were selected, set the directory path to an empty string
+            directory_path = ""
+        else:
+            # Set the directory path to the common directory of the selected files
+            directory_path = os.path.dirname(selected_file_paths[0])
+
+            # Extract only the filenames (without the path) from the selected file paths
+            selected_files.extend([os.path.basename(file_path) for file_path in selected_file_paths])
+
         # Close the window after the user has made a selection
         window.close()
-        
-        # Extract only the filenames (without the path) from the selected file paths
-        selected_file_paths, _ = QFileDialog.getOpenFileNames(None, "Select Files", "", "HDF5 Files (*.hdf5);;All Files (*)")
-        selected_files = [os.path.basename(file_path) for file_path in selected_file_paths]
 
     directory_button.clicked.connect(select_directory)
     files_button.clicked.connect(select_files)
@@ -171,26 +185,6 @@ def ask_user_for_t_range():
     user_response = messagebox.askyesno("Define Range", "Do you want to define the range of 't'?")
 
     return user_response
-    
-# Function to initialize error and success counters
-def initialize_error_and_success_counters():
-    """
-    Initializes counters and lists for error and success tracking.
-    
-    Returns:
-        dict: A dictionary containing counters and lists for error and success tracking.
-    """
-    counters = {
-        'hdf5_files': 0,
-        'q_values': 0,
-        'invalid_data': 0,
-        'success': 0,
-        'failure': 0,
-        'invalid_files': [],
-        'failed_files': []
-    }
-    
-    return counters
 
 # Function to generate the base name
 def generate_base_name(selected_synchrotron, hdf5_file):
@@ -213,7 +207,7 @@ def generate_base_name(selected_synchrotron, hdf5_file):
     elif selected_synchrotron == 'APS':
         base_name = hdf5_file.replace('.hdf5', '')
     elif selected_synchrotron == 'ESRF':
-        base_name = hdf5_file.replace('.h5', '')
+        base_name = hdf5_file.replace('.hdf5', '')
 
     return base_name
 
@@ -285,9 +279,6 @@ def process_sirius_data(file_path):
                 # Check if the data has a single column
                 if column.ndim != 1:
                     continue
-                
-                # Get the column names from the HDF5 file
-                column_names = list(column.dtype.names)
                 
                 # Get the values of the columns
                 t = column['delay time (s)']
@@ -367,16 +358,24 @@ def process_sirius_new_data(file_path):
         
 # Function to process data from APS
 def process_aps_data(file_path):
-    """
-    Process data from an HDF5 file of 'APS' and generate a DataFrame with columns 't' and 'g2(q=X)'.
+    try:
+        with h5py.File(file_path, 'r') as hdf:
+            t_data = hdf['exchange']['tau'][:].squeeze()
+            q_values = hdf['xpcs']['dqlist'][:].squeeze()
+            g2_data = hdf['exchange']['g2avgFIT1'][:].squeeze()
 
-    Args:
-        file_path (str): The path to the HDF5 file.
+            combined_df = pd.DataFrame({'# t': t_data})
 
-    Returns:
-        pd.DataFrame: A DataFrame with columns 't' and 'g2(q=X)' for different 'q' values.
-    """
-    return pd.DataFrame()
+            for i, q_value in enumerate(q_values):
+                g2_data_q = g2_data[:, i]
+                combined_df[f'g2(q={q_value})'] = g2_data_q
+
+            return combined_df
+
+    except (OSError, KeyError) as e:
+        error_message = f"### Error ###:\nThe file does not belong to 'APS' or there is an issue with the data.\n{e}"
+        print(error_message)
+        return None
 
 # Function to process data from ESRF
 def process_esrf_data(file_path):
@@ -503,6 +502,52 @@ def get_t_range_slider(t_values):
 
     return lower_limit, upper_limit
 
+# Function to obtain 't' range limits
+def get_t_range_limits(dataset_df, define_t_range):
+    """
+    Get the lower and upper limits for 't'.
+
+    Args:
+        dataset_df (DataFrame): The dataset DataFrame.
+        define_t_range (bool): Flag indicating if 't' range is defined.
+
+    Returns:
+        tuple: Lower and upper limits for 't'.
+    """
+    # Extract 't' values from the specified DataFrame column
+    t_values = dataset_df['# t'].tolist()
+
+    if define_t_range:
+        # Get the range using a slider
+        return get_t_range_slider(t_values)
+    else:
+        # Use the full range of 't' values
+        return 0, len(t_values) - 1
+
+#-----------------------------------------------------------------------#
+#--------------------------- Initializations ---------------------------#
+#-----------------------------------------------------------------------#
+
+# Function to initialize error and success counters
+def initialize_error_and_success_counters():
+    """
+    Initializes counters and lists for error and success tracking.
+    
+    Returns:
+        dict: A dictionary containing counters and lists for error and success tracking.
+    """
+    counters = {
+        'hdf5_files': 0,
+        'q_values': 0,
+        'invalid_data': 0,
+        'success': 0,
+        'failure': 0,
+        'invalid_files': [],
+        'failed_files': []
+    }
+    
+    return counters
+
 # Function to initialize R tracking for parameter averages
 def initialize_data_for_parameter_averages():
     """
@@ -605,6 +650,10 @@ def initialize_plot(q_len):
         "exp_labels_cumulants": [],
         "fit_lines_cumulants": [],
         "fit_labels_cumulants": [],
+        "exp_lines_selq": [],
+        "exp_labels_selq": [],
+        "fit_lines_selq": [],
+        "fit_labels_selq": [],
     }
 
     return fig1, (ax_single, ax_stretched, ax_cumulants, ax_Cq2_si, ax_Cq_si), fig2, (ax_Cq2_st, ax_Cq_st, ax_gammaq, ax_Cq2_cu, ax_Cq_cu, ax_PDIq), cmap, lines_labels_dict
@@ -631,6 +680,225 @@ def initialize_data_for_derived_params():
     }
         
     return derived_params
+
+#-----------------------------------------------------------------------#
+#------ Interactive parameter selection block (for a single file) ------#
+#-----------------------------------------------------------------------#
+
+# Class for creating an interactive graph window
+class GraphWindow:
+    """
+    Create an interactive graph window for q selection.
+
+    Attributes:
+        root (Tk): The root Tkinter window.
+        new_dataset_df (DataFrame): The dataset for graphing.
+        lower_limit (int): The lower limit for 't' range.
+        upper_limit (int): The upper limit for 't' range.
+        cmap (function): The color map function.
+        figure (Figure): The Matplotlib figure for the graph.
+        ax (Axes): The Matplotlib axes for the graph.
+        canvas (FigureCanvasTkAgg): The Matplotlib canvas for Tkinter.
+        selected_values (list): List to store selected q values.
+        selected_columns (list): List to store selected q columns in DataFrame.
+        lines_labels_dict (dict): Dictionary to store lines and labels information.
+        q_buttons (list): List to store references to the q value selector checkboxes.
+    """
+    def __init__(self, root, new_dataset_df, lower_limit, upper_limit, cmap):
+        """Initialize the GraphWindow."""
+        # Initialize the root window
+        self.root = root
+        self.root.title("Select q values")
+
+        # Initialize the selected values
+        self.selected_values = []
+
+        # Initialize the selected columns
+        self.selected_columns = []
+
+        # Initialize q_buttons list
+        self.q_buttons = []
+
+        # Store dataset information
+        self.new_dataset_df = new_dataset_df
+        self.lower_limit = lower_limit
+        self.upper_limit = upper_limit
+        self.cmap = cmap
+
+        # Create lines and labels dictionary
+        self.lines_labels_dict = {
+            "exp_lines_selq": [],
+            "exp_labels_selq": [],
+            "fit_lines_selq": [],
+            "fit_labels_selq": []
+        }
+
+        # Create the interactive graph
+        self.create_graph()
+
+        # Create the q value selector checkboxes
+        self.create_q_selector()
+
+        # Create the Select and Exit buttons
+        self.create_buttons()
+
+        # Center the window on the screen
+        self.root.update_idletasks()
+        width = self.root.winfo_reqwidth()
+        height = self.root.winfo_reqheight()
+        x = (self.root.winfo_screenwidth() - width) // 2
+        y = (self.root.winfo_screenheight() - height) // 2
+        self.root.geometry("+%d+%d" % (x, y))
+
+    def create_graph(self):
+        """Create the interactive graph."""
+        self.figure = Figure(figsize=(8, 6))
+        self.ax = self.figure.add_subplot(111)
+        self.canvas = FigureCanvasTkAgg(self.figure, master=self.root)
+        self.canvas.get_tk_widget().pack(side='top', fill='both', expand=1)
+        
+        # Iterate over the columns and adjust the code
+        for i, q_column in enumerate(self.new_dataset_df.columns[1:], 1):
+            
+            # Extract the q value from the column name
+            match = re.search(r"q=(\d+\.\d+)", q_column)
+            if match:
+                q_value = float(match.group(1))
+            
+            # Get the 't' and 'g2' data for the current q value
+            t_q = self.new_dataset_df['# t']
+            g2_q = self.new_dataset_df[q_column]
+
+            # Slice the values of 't' and 'g2' using the provided indices
+            t_q = t_q.iloc[self.lower_limit:self.upper_limit + 1]
+            g2_q = g2_q.iloc[self.lower_limit:self.upper_limit + 1]
+
+            # Fit the Single Exponential Model
+            fit_params_selq, fitted_curve_selq, r2_selq = fit_single_exponential(t_q, g2_q)
+                
+            A_selq = fit_params_selq[0]
+            B_selq = fit_params_selq[1]
+
+            ### Plot the experimental data and the fitted curves ###
+
+            color = self.cmap(i-1)  # Get color based on index
+                
+            # Plot experimental data points
+            line_exp_sq = self.ax.semilogx(t_q, (g2_q - A_selq)/B_selq, 'o', color=color)[0]
+
+            # Plot fitted curve
+            line_fit_sq = self.ax.semilogx(t_q, (fitted_curve_selq - A_selq)/B_selq, color=color, linestyle='-')[0]
+
+            # Add labels to the legend lists based on the model type
+            self.lines_labels_dict["exp_lines_selq"].append(line_exp_sq)
+            self.lines_labels_dict["exp_labels_selq"].append(f"q = {q_value:.6f}")
+            self.lines_labels_dict["fit_lines_selq"].append(line_fit_sq)
+            self.lines_labels_dict["fit_labels_selq"].append(f"R2: {r2_selq:.3f}")
+                
+        ### Configure the plot ###
+        
+        # Configure legend and title
+        self.ax.set_title('Correlation function fitting - Single Exponential Model')
+        self.ax.set_xlabel('Delay Time (s)')
+        self.ax.set_ylabel(r'$(g_2 - \mathrm{baseline}) / \beta$')
+        
+        # Add labels to the plot
+        # Combine q and R values
+        combined_labels = [f"{exp_label} - {fit_label}" for exp_label, fit_label in
+                           zip(self.lines_labels_dict["exp_labels_selq"], self.lines_labels_dict["fit_labels_selq"])]
+        
+        # Create the legend for experimental data
+        legend_exp = self.ax.legend(self.lines_labels_dict["exp_lines_selq"], combined_labels,
+                                    loc='upper right', bbox_to_anchor=(1, 1), borderaxespad=0)
+        self.ax.add_artist(legend_exp)
+
+        self.canvas.draw()
+
+    def create_q_selector(self):
+        """Create the q value selector checkboxes."""
+        for i, q_column in enumerate(self.new_dataset_df.columns[1:], 1):
+            # Use regular expression to extract q value
+            match = re.search(r"q=(\d+\.\d+)", q_column)
+            if match:
+                q_value = float(match.group(1))
+
+                # Initially selected state
+                #initial_state = tk.NORMAL
+
+                # Create a custom style for the Checkbutton
+                style = ttk.Style()
+                style.configure("TCheckbutton", indicatorrelief="flat", relief="flat")
+
+                btn_var = tk.BooleanVar(value=True)  # Use a separate BooleanVar
+                btn = ttk.Checkbutton(self.root, text=f'q = {q_value:.6f}', style="TCheckbutton",
+                                    variable=btn_var, #state=initial_state,
+                                    command=lambda q=q_value, var=btn_var: self.toggle_curve(q, var))
+
+                btn.invoke()  # Invoke the button to set its initial state
+
+                btn.pack()
+
+                # Append the button and its associated variable to the q_buttons list
+                self.q_buttons.append((btn, btn_var))
+
+    def toggle_curve(self, q_value, var):
+        """Toggle visibility of the curve for the specified q value."""
+        # Find the index of q in the q list
+        q_index = self.lines_labels_dict["exp_labels_selq"].index(f"q = {q_value:.6f}")
+
+        # Toggle visibility of the experimental curve and the fitted curve
+        exp_line = self.lines_labels_dict["exp_lines_selq"][q_index]
+        fit_line = self.lines_labels_dict["fit_lines_selq"][q_index]
+
+        exp_line.set_visible(not exp_line.get_visible())
+        fit_line.set_visible(not fit_line.get_visible())
+
+        # Update the selected values list based on the visibility
+        self.selected_values = [
+            float(re.search(r"q=(\d+\.\d+)", column).group(1))
+            for column, line in zip(self.new_dataset_df.columns[1:], self.lines_labels_dict["exp_lines_selq"])
+            if line.get_visible()
+        ]
+
+        # Update the selected values list based on the visibility
+        self.selected_columns = [
+            q for q, line in zip(self.new_dataset_df.columns[1:], self.lines_labels_dict["exp_lines_selq"])
+            if line.get_visible()
+        ]
+
+        # Redraw the canvas to reflect the changes
+        self.canvas.draw()
+
+    def create_buttons(self):
+        """Create the Select and Exit buttons."""
+        ttk.Button(self.root, text="Select", command=self.select_values).pack(side='left', padx=10)
+        ttk.Button(self.root, text="Exit", command=self.exit_window).pack(side='right', padx=10)
+
+    def select_values(self):
+        """Save the selected values and close the window."""
+        #print("Selected values:", self.selected_values)
+
+        # Filter the columns of the original DataFrame based on the selected q values
+        selected_columns = ['# t'] + self.selected_columns
+        filtered_dataset_df = self.new_dataset_df[selected_columns]
+
+        # Modify the original DataFrame
+        self.new_dataset_df = filtered_dataset_df
+
+        # Close the Tkinter window
+        self.root.quit()
+        #self.root.destroy()
+
+        # Return the filtered DataFrame
+        return filtered_dataset_df
+
+    def exit_window(self):
+        """Close the window without saving changes."""
+        self.root.destroy()
+
+#-----------------------------------------------------------------------#
+#----------------------------- Fit Models ------------------------------#
+#-----------------------------------------------------------------------#
 
 # Function to fit a given model to the data and return parameters, fitted curve, and R2 score
 def fit_model(t, g2, model_func, initial_params):
@@ -739,147 +1007,89 @@ def cumulants_model(t, A, B, C1, C2):
     """
     return A + B * np.exp(-2 * C1 * t) * (1 + (1 / 2) * C2 * t**2)**2
 
-# Function to calculate relaxation time and diffusion coefficient
-def calculate_relaxation_and_diffusion(params, q_value):
+# Function to fit a single exponential model to the provided data
+def fit_single_exponential(t, g2):
     """
-    Calculate relaxation time and diffusion coefficient.
-
-    Parameters:
-        params (array-like): Fit parameters from the model.
-        q_value (float): The q value.
-
-    Returns:
-        float: Relaxation time.
-        float: Diffusion coefficient.
-    """
-    try:
-        C = params[2]
-        relax_time = 1 / C                                      # 1/C
-        diffusion_coef = (C / (q_value ** 2)) * 0.00000001      # C/q^2
-    except (IndexError, ZeroDivisionError):
-        relax_time = np.nan
-        diffusion_coef = np.nan
-    return relax_time, diffusion_coef
-
-# Function to add the data to the table
-def add_data_to_table(table_data, base_name, q_value, params, relax_time, diffusion_coef, r2):
-    """
-    Appends data to a table.
-
-    Parameters:
-        table_data (list): The list containing the table data.
-        base_name (str): The base name.
-        q_value (float): The q-value.
-        params (list): List of parameters to be added to the table.
-        relax_time (float): The relaxation time.
-        diffusion_coef (float): The diffusion coefficient.
-        r2 (float): The R2 score.
-    """
-    table_row = [base_name, q_value, *params, relax_time, diffusion_coef, r2]
-    table_data.append(table_row)
-
-# Function to write data to .dat file
-def write_dat_file(output_path, q_value, t, g2, A_single, B_single, C_single, A_stretched, B_stretched, C_stretched, gamma,
-                   r2_single, r2_stretched, relax_time_single, relax_time_stretched, diffusion_coef_single, diffusion_coef_stretched,
-                   A_cumulants, B_cumulants, C1_cumulants, C2_cumulants, r2_cumulants, relax_time_cumulants, diffusion_coef_cumulants):
-    """
-    Write data and comments to a .dat file.
-
-    Parameters:
-        output_path (str): The path to the output .dat file.
-        q_value (float): The q-value associated with the data.
-        t (array-like): Time values.
-        g2 (array-like): Experimental data.
-        A_single, B_single, C_single, A_stretched, B_stretched, C_stretched, gamma, A_cumulants, B_cumulants, C1_cumulants, C2_cumulants (float): Fit parameters for Single Exponential, Stretched Exponential and Cumulants Model.
-        r2_single, r2_stretched, r2_cumulant (float): R2 scores for Single Exponential, Stretched Exponential and Cumulants Model.
-        relax_time_single, relax_time_stretched, relax_time_cumulants (float): Relaxation times for Single Exponential, Stretched Exponential and Cumulants Model.
-        diffusion_coef_single, diffusion_coef_stretched, diffusion_coef_cumulants (float): Diffusion coefficients for Single Exponential, Stretched Exponential and Cumulants Model.
-    """
-    with open(output_path, 'w') as dat_file:
-        dat_file.write(f"q = {q_value} A^-1\n")
-        dat_file.write("### Fit model: Single Exponential ###\n")
-        dat_file.write(f"#Fit parameters: baseline = {A_single}, beta = {B_single}, relax rate (1/s) = {C_single}\n")
-        dat_file.write(f"#R2: {r2_single}\n")
-        dat_file.write(f"#Derived parameters: Relax. time (s) = {relax_time_single}, Diffusion coef (u2/s) = {diffusion_coef_single}\n")
-        dat_file.write("### Fit model: Stretched Exponential ###\n")
-        dat_file.write(f"#Fit parameters: baseline = {A_stretched}, beta = {B_stretched}, relax rate (1/s) = {C_stretched}, gamma = {gamma}\n")
-        dat_file.write(f"#R2: {r2_stretched}\n")
-        dat_file.write(f"#Derived parameters: Relax. time (s) = {relax_time_stretched}, Diffusion coef (u2/s) = {diffusion_coef_stretched}\n")
-        dat_file.write("### Fit model: Cumulants Model ###\n")
-        dat_file.write(f"#Fit parameters: baseline = {A_cumulants}, beta = {B_cumulants}, relax rate (1/s) = {C1_cumulants}, PDI = {C2_cumulants/C1_cumulants**2}\n")
-        dat_file.write(f"#R2: {r2_cumulants}\n")
-        dat_file.write(f"#Derived parameters: Relax. time (s) = {relax_time_cumulants}, Diffusion coef (u2/s) = {diffusion_coef_cumulants}\n")
-        dat_file.write("#delay time (s)\tg2\tstd\tFitted g2 Single\tFitted g2 Stretched\tFitted g2 Cumulants\n")
-
-        fitted_curve_single = A_single + B_single * np.exp(-2 * C_single * t)
-        fitted_curve_stretched = A_stretched + B_stretched * np.exp(-2 * C_stretched * t) ** gamma
-        fitted_curve_cumulants = A_cumulants + B_cumulants * np.exp(-2 * C1_cumulants * t) * (1 + (1 / 2) * C2_cumulants * t**2)**2
-
-        for i in range(len(t)):
-            row_str = f"{t[i]}\t{g2[i]}\t{np.std(g2)}\t{fitted_curve_single[i]}\t{fitted_curve_stretched[i]}\t{fitted_curve_cumulants[i]}\n"
-            dat_file.write(row_str)
-
-# Function to plot experimental data and fitted curves
-def plot_data_and_curves(ax, t, g2, baseline, Beta, fitted_curve, q_value, r2_value, lines_labels_dict, color, linestyle, model_type):
-    """
-    Add experimental data and fitted curves to a plot.
+    Fit a single exponential model to the provided data.
 
     Args:
-        ax (matplotlib.axes.Axes): The Axes object to which data will be added.
         t (numpy.ndarray): Array of delay times.
         g2 (numpy.ndarray): Array of experimental g2 values.
-        baseline (float): Value of the fitting parameter baseline (e.g., A_single)
-        Beta (float): Value of the fitting parameter Beta (e.g., B_single B_stretched or B_cumulants).
-        fitted_curve (numpy.ndarray): Fitted curve.
-        q_value (float): Value of q.
-        r2_value (float): R-squared value.
-        lines_labels_dict (dict): Dictionary containing lists for organizing data.
-        color (str): The color for the plot elements.
-        linestyle (str, optional): The linestyle for the fitted curve. Defaults to '-'.
-        model_type (str): The type of model, either "Single", "Stretched" or "Cumulants".
 
     Returns:
-        None
+        tuple: A tuple containing fit parameters, fitted curve, and R-squared value.
     """
-    # Plot experimental data points
-    line_exp = ax.semilogx(t, (g2 - baseline)/Beta, 'o', color=color)[0]
+    # Calculate the initial guess for parameters A and B:
+    A0 = np.mean(g2[-5:])     # Average of the last 5 points
+    B0 = np.mean(g2[:2]) - 1  # Average of the first 2 points minus 1
 
-    # Plot fitted curve
-    line_fit = ax.semilogx(t, (fitted_curve - baseline)/Beta, color=color, linestyle=linestyle)[0]
+    # Calculate the initial guess for parameter C:
+    # Obtain y
+    y = (np.mean(g2[:2]) + np.mean(g2[-5:])) / 2
+    # Find the closest x value in the experimental curve
+    closest_index = np.abs(g2 - y).argmin()
+    closest_x = t[closest_index]
+    # Obtain C0:
+    C0 = 1 / closest_x
 
-    # Add labels to the legend lists based on the model type
-    lines_labels_dict[f"exp_lines_{model_type.lower()}"].append(line_exp)
-    lines_labels_dict[f"exp_labels_{model_type.lower()}"].append(f"q = {q_value:.6f}")
-    lines_labels_dict[f"fit_lines_{model_type.lower()}"].append(line_fit)
-    lines_labels_dict[f"fit_labels_{model_type.lower()}"].append(f"R2: {r2_value:.3f}")
+    # Initial guess for parameters A, B, and C:
+    initial_params_single = [A0, B0, C0]
 
-# Function to update parameter tracking
-def update_parameter_tracking_r(parameter_data, model, r_value, parameter_value1, parameter_value2=None):
+    # Fit the curve g2 = A + B * exp(-2C * t)
+    fit_params_single, fitted_curve_single, r2_single = fit_model_with_constraints(t, g2, single_exponential, initial_params_single)
+    #fit_params_single0, fitted_curve_single0, r2_single0 = fit_model(t, g2, single_exponential, initial_params_single)
+
+    return fit_params_single, fitted_curve_single, r2_single
+
+# Function to fit a stretched exponential model to the provided data
+def fit_stretched_exponential(t, g2, fit_params_single):
     """
-    Updates the parameter tracking counters and sums for a specific model.
+    Fit a stretched exponential model to the provided data.
 
     Args:
-        parameter_data (dict): A dictionary containing counters and sums for parameter values.
-        model (str): The model name ('single', 'stretched', or 'cumulants').
-        r_value (float): The R value for the current adjustment.
-        parameter_value1 (float): The first parameter value for the current adjustment.
-        parameter_value2 (float, optional): The second parameter value for the current adjustment (only for models requiring two parameters).
-    """
-    parameter_data[model]['R count'] += 1
-    parameter_data[model]['Diff_coef sum'] += parameter_value1
-        
-    if model == 'stretched' and parameter_value2 is not None:
-        parameter_data[model]['Gamma sum'] += parameter_value2
-    elif model == 'cumulants' and parameter_value2 is not None:
-        parameter_data[model]['PDI sum'] += parameter_value2
+        t (numpy.ndarray): Array of delay times.
+        g2 (numpy.ndarray): Array of experimental g2 values.
+        fit_params_single (list): Parameters obtained from the single exponential fit.
 
-    # Guardar el valor individual en una lista para el cálculo del desvío estándar
-    parameter_data[model]['Diff_coef values'].append(parameter_value1)
-    
-    if model == 'stretched' and parameter_value2 is not None:
-        parameter_data[model]['Gamma values'].append(parameter_value2)
-    elif model == 'cumulants' and parameter_value2 is not None:
-        parameter_data[model]['PDI values'].append(parameter_value2)
+    Returns:
+        tuple: A tuple containing fit parameters, fitted curve, and R-squared value.
+    """
+    # Initial guess for parameter gamma
+    gamma0 = 1
+
+    # Use the parameters A, B, C from the Single Exponential fit and gamma0 as initial guess
+    initial_params_stretched = [*fit_params_single, gamma0]
+
+    # Fit the curve g2 = A + B * exp(-2C * t)**gamma
+    fit_params_stretched, fitted_curve_stretched, r2_stretched = fit_model_with_constraints(t, g2, stretched_exponential, initial_params_stretched)
+    #fit_params_stretched0, fitted_curve_stretched0, r2_stretched0 = fit_model(t, g2, stretched_exponential, initial_params_stretched)
+        
+    return fit_params_stretched, fitted_curve_stretched, r2_stretched
+
+# Function to fit a cumulants model to the provided data
+def fit_cumulants(t, g2, fit_params_single):
+    """
+    Fit a cumulants model to the provided data.
+
+    Args:
+        t (numpy.ndarray): Array of delay times.
+        g2 (numpy.ndarray): Array of experimental g2 values.
+        fit_params_single (list): Parameters obtained from the single exponential fit.
+
+    Returns:
+        tuple: A tuple containing fit parameters, fitted curve, and R-squared value.
+    """
+    # Initial guess for parameter C2
+    C2_0 = 0.05*fit_params_single[2]**2
+
+    # Use the parameters A, B, C from the Single Exponential fit and C2 as initial guess
+    initial_params_cumulants = [*fit_params_single, C2_0]
+
+    # Fit the curve g2 = A + B * exp(-2C1 * t)*(1 + (1/2)* C2 * t**2)**2
+    fit_params_cumulants, fitted_curve_cumulants, r2_cumulants = fit_model_with_constraints(t, g2, cumulants_model, initial_params_cumulants)
+    #fit_params_cumulants0, fitted_curve_cumulants0, r2_cumulants0 = fit_model(t, g2, cumulants_model, initial_params_cumulants)
+        
+    return fit_params_cumulants, fitted_curve_cumulants, r2_cumulants
 
 # Define the function that will perform the linear fit and return the parameters
 def fit_linear_model(q_squared_values, C_values):
@@ -968,6 +1178,283 @@ def fit_exponential_model(q_values, C_values):
     except (RuntimeError, ValueError):
         # Handle fitting errors, e.g., NaN or infinite values
         return np.nan, np.nan, np.nan, np.nan, np.nan
+
+#-----------------------------------------------------------------------#
+#------------------ Calculations and Data Processing -------------------#
+#-----------------------------------------------------------------------#
+
+# Function to calculate relaxation time and diffusion coefficient
+def calculate_relaxation_and_diffusion(params, q_value):
+    """
+    Calculate relaxation time and diffusion coefficient.
+
+    Parameters:
+        params (array-like): Fit parameters from the model.
+        q_value (float): The q value.
+
+    Returns:
+        float: Relaxation time.
+        float: Diffusion coefficient.
+    """
+    try:
+        C = params[2]
+        relax_time = 1 / C                                      # 1/C
+        diffusion_coef = (C / (q_value ** 2)) * 0.00000001      # C/q^2
+    except (IndexError, ZeroDivisionError):
+        relax_time = np.nan
+        diffusion_coef = np.nan
+    return relax_time, diffusion_coef
+
+# Function to update parameter tracking
+def update_parameter_tracking_r(parameter_data, model, r_value, parameter_value1, parameter_value2=None):
+    """
+    Updates the parameter tracking counters and sums for a specific model.
+
+    Args:
+        parameter_data (dict): A dictionary containing counters and sums for parameter values.
+        model (str): The model name ('single', 'stretched', or 'cumulants').
+        r_value (float): The R value for the current adjustment.
+        parameter_value1 (float): The first parameter value for the current adjustment.
+        parameter_value2 (float, optional): The second parameter value for the current adjustment (only for models requiring two parameters).
+    """
+    parameter_data[model]['R count'] += 1
+    parameter_data[model]['Diff_coef sum'] += parameter_value1
+        
+    if model == 'stretched' and parameter_value2 is not None:
+        parameter_data[model]['Gamma sum'] += parameter_value2
+    elif model == 'cumulants' and parameter_value2 is not None:
+        parameter_data[model]['PDI sum'] += parameter_value2
+
+    # Guardar el valor individual en una lista para el cálculo del desvío estándar
+    parameter_data[model]['Diff_coef values'].append(parameter_value1)
+    
+    if model == 'stretched' and parameter_value2 is not None:
+        parameter_data[model]['Gamma values'].append(parameter_value2)
+    elif model == 'cumulants' and parameter_value2 is not None:
+        parameter_data[model]['PDI values'].append(parameter_value2)
+
+# Function to calculate average parameter values
+def calculate_average_parameter_values(param_dict, model):
+    """
+    Calculates the average parameter values and standard deviation for different models based on parameter tracking.
+
+    Args:
+        param_dict (dict): A dictionary containing counters and sums for parameter values.
+        model (str): The key for which to calculate average values.
+
+    Returns:
+        dict: A dictionary containing the calculated average values and standard deviation.
+    """
+    average_parameters = {}
+
+    if model in param_dict:
+        parameters = param_dict[model]
+
+        # Calculate the average Diff_coef value
+        average_parameters['Diff_coef av'] = parameters['Diff_coef sum'] / parameters['R count']
+        
+        # Calculate the standard deviation for Diff_coef
+        diff_coef_values = parameters['Diff_coef values']
+        diff_coef_std = np.std(diff_coef_values)
+        average_parameters['Diff_coef std'] = diff_coef_std
+
+        if model == 'stretched':
+            # Calculate the average Gamma value
+            average_parameters['Gamma av'] = parameters['Gamma sum'] / parameters['R count']
+
+            # Calculate the standard deviation for Gamma
+            gamma_values = parameters['Gamma values']
+            gamma_std = np.std(gamma_values)
+            average_parameters['Gamma std'] = gamma_std
+
+        elif model == 'cumulants':
+            # Calculate the average PDI value
+            average_parameters['PDI av'] = parameters['PDI sum'] / parameters['R count']
+
+            # Calculate the standard deviation for PDI
+            pdi_values = parameters['PDI values']
+            pdi_std = np.std(pdi_values)
+            average_parameters['PDI std'] = pdi_std
+
+    return average_parameters
+
+#-----------------------------------------------------------------------#
+#-------------------- Result Saving and Reporting ----------------------#
+#-----------------------------------------------------------------------#
+
+# Function to add the data to the table
+def add_data_to_table(table_data, base_name, q_value, params, relax_time, diffusion_coef, r2):
+    """
+    Appends data to a table.
+
+    Parameters:
+        table_data (list): The list containing the table data.
+        base_name (str): The base name.
+        q_value (float): The q-value.
+        params (list): List of parameters to be added to the table.
+        relax_time (float): The relaxation time.
+        diffusion_coef (float): The diffusion coefficient.
+        r2 (float): The R2 score.
+    """
+    table_row = [base_name, q_value, *params, relax_time, diffusion_coef, r2]
+    table_data.append(table_row)
+
+# Function to write data to .dat file
+def write_dat_file(output_path, q_value, t, g2, A_single, B_single, C_single, A_stretched, B_stretched, C_stretched, gamma,
+                   r2_single, r2_stretched, relax_time_single, relax_time_stretched, diffusion_coef_single, diffusion_coef_stretched,
+                   A_cumulants, B_cumulants, C1_cumulants, C2_cumulants, r2_cumulants, relax_time_cumulants, diffusion_coef_cumulants):
+    """
+    Write data and comments to a .dat file.
+
+    Parameters:
+        output_path (str): The path to the output .dat file.
+        q_value (float): The q-value associated with the data.
+        t (array-like): Time values.
+        g2 (array-like): Experimental data.
+        A_single, B_single, C_single, A_stretched, B_stretched, C_stretched, gamma, A_cumulants, B_cumulants, C1_cumulants, C2_cumulants (float): Fit parameters for Single Exponential, Stretched Exponential and Cumulants Model.
+        r2_single, r2_stretched, r2_cumulant (float): R2 scores for Single Exponential, Stretched Exponential and Cumulants Model.
+        relax_time_single, relax_time_stretched, relax_time_cumulants (float): Relaxation times for Single Exponential, Stretched Exponential and Cumulants Model.
+        diffusion_coef_single, diffusion_coef_stretched, diffusion_coef_cumulants (float): Diffusion coefficients for Single Exponential, Stretched Exponential and Cumulants Model.
+    """
+    with open(output_path, 'w') as dat_file:
+        dat_file.write(f"q = {q_value} A^-1\n")
+        dat_file.write("### Fit model: Single Exponential ###\n")
+        dat_file.write(f"#Fit parameters: baseline = {A_single}, beta = {B_single}, relax rate (1/s) = {C_single}\n")
+        dat_file.write(f"#R2: {r2_single}\n")
+        dat_file.write(f"#Derived parameters: Relax. time (s) = {relax_time_single}, Diffusion coef (u2/s) = {diffusion_coef_single}\n")
+        dat_file.write("### Fit model: Stretched Exponential ###\n")
+        dat_file.write(f"#Fit parameters: baseline = {A_stretched}, beta = {B_stretched}, relax rate (1/s) = {C_stretched}, gamma = {gamma}\n")
+        dat_file.write(f"#R2: {r2_stretched}\n")
+        dat_file.write(f"#Derived parameters: Relax. time (s) = {relax_time_stretched}, Diffusion coef (u2/s) = {diffusion_coef_stretched}\n")
+        dat_file.write("### Fit model: Cumulants Model ###\n")
+        dat_file.write(f"#Fit parameters: baseline = {A_cumulants}, beta = {B_cumulants}, relax rate (1/s) = {C1_cumulants}, PDI = {C2_cumulants/C1_cumulants**2}\n")
+        dat_file.write(f"#R2: {r2_cumulants}\n")
+        dat_file.write(f"#Derived parameters: Relax. time (s) = {relax_time_cumulants}, Diffusion coef (u2/s) = {diffusion_coef_cumulants}\n")
+        dat_file.write("#delay time (s)\tg2\tstd\tFitted g2 Single\tFitted g2 Stretched\tFitted g2 Cumulants\n")
+
+        fitted_curve_single = A_single + B_single * np.exp(-2 * C_single * t)
+        fitted_curve_stretched = A_stretched + B_stretched * np.exp(-2 * C_stretched * t) ** gamma
+        fitted_curve_cumulants = A_cumulants + B_cumulants * np.exp(-2 * C1_cumulants * t) * (1 + (1 / 2) * C2_cumulants * t**2)**2
+
+        for i in range(len(t)):
+            row_str = f"{t[i]}\t{g2[i]}\t{np.std(g2)}\t{fitted_curve_single[i]}\t{fitted_curve_stretched[i]}\t{fitted_curve_cumulants[i]}\n"
+            dat_file.write(row_str)
+
+# Function to print error and success counters
+def print_summary(counters):
+    """
+    Print a summary of processing results.
+
+    Parameters:
+        counters (dict): A dictionary containing counters and lists for error and success tracking.
+    """
+    print(f"Total HDF5 files: {counters['hdf5_files']}")
+    print(f"Total q values: {counters['q_values']}")
+    print(f"Total invalid files: {counters['invalid_data']}")
+
+    # Print the base_names of invalid files
+    if counters['invalid_data'] != 0:
+        print("Invalid files:")
+        for file_name in counters['invalid_files']:
+            print(file_name)
+    
+    print(f"Successful fits: {counters['success']}")
+    print(f"Failed fits: {counters['failure']}")
+
+    # Print the base_names of failed files
+    if counters['failure'] != 0:
+        print("Failed fits files:")
+        for file_name in counters['failed_files']:
+            print(file_name)
+
+# Function to generate fit results tables
+def generate_fit_results_tables(directory, table_data_single, table_data_stretched, table_data_cumulants):
+    """
+    Generate .dat files with fit results tables for Single Exponential, Stretched Exponential, and Cumulants models.
+
+    Parameters:
+        directory (str): Directory where the .dat files will be saved.
+        table_data_single (list): List of lists containing data for Single Exponential table.
+        table_data_stretched (list): List of lists containing data for Stretched Exponential table.
+        table_data_cumulants (list): List of lists containing data for Cumulants table.
+    """
+    table_output_path_single = os.path.join(directory, "fit_results_single.dat")
+    table_output_path_stretched = os.path.join(directory, "fit_results_stretched.dat")
+    table_output_path_cumulants = os.path.join(directory, "fit_results_cumulants.dat")
+
+    with open(table_output_path_single, 'w') as table_file_single, open(table_output_path_stretched, 'w') as table_file_stretched, open(table_output_path_cumulants, 'w') as table_file_cumulants:
+        # Write header for Single Exponential
+        header_single = "{:^26} {:^13} {:^23} {:^24} {:^24} {:^26} {:^25} {:^24}\n".format(
+            "Filename", "q (A^-1)", "Baseline", "beta", "Relax. rate (s-1)", "Relax. time (s)", "Diff. coefficient (u2/s)", "R2"
+        )
+        table_file_single.write(header_single)
+
+        # Write header for Stretched Exponential
+        header_stretched = "{:^26} {:^13} {:^23} {:^24} {:^24} {:^24} {:^26} {:^25} {:^24}\n".format(
+            "Filename", "q (A^-1)", "Baseline", "beta", "Relax. rate (s-1)", "Gamma", "Relax. time (s)", "Diff. coefficient (u2/s)", "R2"
+        )
+        table_file_stretched.write(header_stretched)
+
+        # Write header for Cumulants
+        header_cumulants = "{:^26} {:^13} {:^23} {:^24} {:^24} {:^24} {:^26} {:^25} {:^24}\n".format(
+            "Filename", "q (A^-1)", "Baseline", "beta", "Relax. rate (s-1)", "PDI", "Relax. time (s)", "Diff. coefficient (u2/s)", "R2"
+        )
+        table_file_cumulants.write(header_cumulants)
+
+        # Write table data for Single Exponential
+        for row_single in table_data_single:
+            row_str_single = "{:<26} {:<13} {:<23} {:<24} {:<24} {:<26} {:<25} {:<24}\n".format(*row_single)
+            table_file_single.write(row_str_single)
+
+        # Write table data for Stretched Exponential
+        for row_stretched in table_data_stretched:
+            row_str_stretched = "{:<26} {:<13} {:<23} {:<24} {:<24} {:<24} {:<26} {:<25} {:<24}\n".format(*row_stretched)
+            table_file_stretched.write(row_str_stretched)
+
+        # Write table data for Cumulants
+        for row_cumulants in table_data_cumulants:
+            row_str_cumulants = "{:<26} {:<13} {:<23} {:<24} {:<24} {:<24} {:<26} {:<25} {:<24}\n".format(*row_cumulants)
+            table_file_cumulants.write(row_str_cumulants)
+
+    print("Fit results tables generated successfully.")
+
+#-----------------------------------------------------------------------#
+#--------------------- Plotting and Visualization ----------------------#
+#-----------------------------------------------------------------------#
+
+# Function to plot experimental data and fitted curves
+def plot_data_and_curves(ax, t, g2, baseline, Beta, fitted_curve, q_value, r2_value, lines_labels_dict, color, linestyle, model_type):
+    """
+    Add experimental data and fitted curves to a plot.
+
+    Args:
+        ax (matplotlib.axes.Axes): The Axes object to which data will be added.
+        t (numpy.ndarray): Array of delay times.
+        g2 (numpy.ndarray): Array of experimental g2 values.
+        baseline (float): Value of the fitting parameter baseline (e.g., A_single)
+        Beta (float): Value of the fitting parameter Beta (e.g., B_single B_stretched or B_cumulants).
+        fitted_curve (numpy.ndarray): Fitted curve.
+        q_value (float): Value of q.
+        r2_value (float): R-squared value.
+        lines_labels_dict (dict): Dictionary containing lists for organizing data.
+        color (str): The color for the plot elements.
+        linestyle (str, optional): The linestyle for the fitted curve. Defaults to '-'.
+        model_type (str): The type of model, either "Single", "Stretched" or "Cumulants".
+
+    Returns:
+        None
+    """
+    # Plot experimental data points
+    line_exp = ax.semilogx(t, (g2 - baseline)/Beta, 'o', color=color)[0]
+
+    # Plot fitted curve
+    line_fit = ax.semilogx(t, (fitted_curve - baseline)/Beta, color=color, linestyle=linestyle)[0]
+
+    # Add labels to the legend lists based on the model type
+    lines_labels_dict[f"exp_lines_{model_type.lower()}"].append(line_exp)
+    lines_labels_dict[f"exp_labels_{model_type.lower()}"].append(f"q = {q_value:.6f}")
+    lines_labels_dict[f"fit_lines_{model_type.lower()}"].append(line_fit)
+    lines_labels_dict[f"fit_labels_{model_type.lower()}"].append(f"R2: {r2_value:.3f}")
 
 # Define the function to fit and plot a specified model
 def fit_and_plot_model(x_values, relax_rate_values, ax, cmap, label, model_type='linear'):
@@ -1121,52 +1608,9 @@ def configure_subplot(ax, title, xlabel, ylabel, exp_lines, exp_labels, fit_line
     legend_exp = ax.legend(exp_lines, combined_labels, loc='upper right', bbox_to_anchor=(1, 1), borderaxespad=0)
     ax.add_artist(legend_exp)
 
-# Function to calculate average parameter values
-def calculate_average_parameter_values(param_dict, model):
-    """
-    Calculates the average parameter values and standard deviation for different models based on parameter tracking.
+    #print("Combined Labels:", combined_labels)
 
-    Args:
-        param_dict (dict): A dictionary containing counters and sums for parameter values.
-        model (str): The key for which to calculate average values.
-
-    Returns:
-        dict: A dictionary containing the calculated average values and standard deviation.
-    """
-    average_parameters = {}
-
-    if model in param_dict:
-        parameters = param_dict[model]
-
-        # Calculate the average Diff_coef value
-        average_parameters['Diff_coef av'] = parameters['Diff_coef sum'] / parameters['R count']
-        
-        # Calculate the standard deviation for Diff_coef
-        diff_coef_values = parameters['Diff_coef values']
-        diff_coef_std = np.std(diff_coef_values)
-        average_parameters['Diff_coef std'] = diff_coef_std
-
-        if model == 'stretched':
-            # Calculate the average Gamma value
-            average_parameters['Gamma av'] = parameters['Gamma sum'] / parameters['R count']
-
-            # Calculate the standard deviation for Gamma
-            gamma_values = parameters['Gamma values']
-            gamma_std = np.std(gamma_values)
-            average_parameters['Gamma std'] = gamma_std
-
-        elif model == 'cumulants':
-            # Calculate the average PDI value
-            average_parameters['PDI av'] = parameters['PDI sum'] / parameters['R count']
-
-            # Calculate the standard deviation for PDI
-            pdi_values = parameters['PDI values']
-            pdi_std = np.std(pdi_values)
-            average_parameters['PDI std'] = pdi_std
-
-    return average_parameters
-
-# Function to calculate the text position
+# Function to calculate the text position on the plot
 def calculate_text_position(q_count):
     """
     Calculate text positions based on q_count.
@@ -1186,82 +1630,6 @@ def calculate_text_position(q_count):
 
     return diff_coef_position
 
-# Function to print error and success counters
-def print_summary(counters):
-    """
-    Print a summary of processing results.
 
-    Parameters:
-        counters (dict): A dictionary containing counters and lists for error and success tracking.
-    """
-    print(f"Total HDF5 files: {counters['hdf5_files']}")
-    print(f"Total x files: {counters['q_values']}")
-    print(f"Total invalid files: {counters['invalid_data']}")
-
-    # Print the base_names of invalid files
-    if counters['invalid_data'] != 0:
-        print("Invalid files:")
-        for file_name in counters['invalid_files']:
-            print(file_name)
     
-    print(f"Successful fits: {counters['success']}")
-    print(f"Failed fits: {counters['failure']}")
-
-    # Print the base_names of failed files
-    if counters['failure'] != 0:
-        print("Failed fits files:")
-        for file_name in counters['failed_files']:
-            print(file_name)
-
-# Function to generate fit results tables
-def generate_fit_results_tables(directory, table_data_single, table_data_stretched, table_data_cumulants):
-    """
-    Generate .dat files with fit results tables for Single Exponential, Stretched Exponential, and Cumulants models.
-
-    Parameters:
-        directory (str): Directory where the .dat files will be saved.
-        table_data_single (list): List of lists containing data for Single Exponential table.
-        table_data_stretched (list): List of lists containing data for Stretched Exponential table.
-        table_data_cumulants (list): List of lists containing data for Cumulants table.
-    """
-    table_output_path_single = os.path.join(directory, "fit_results_single.dat")
-    table_output_path_stretched = os.path.join(directory, "fit_results_stretched.dat")
-    table_output_path_cumulants = os.path.join(directory, "fit_results_cumulants.dat")
-
-    with open(table_output_path_single, 'w') as table_file_single, open(table_output_path_stretched, 'w') as table_file_stretched, open(table_output_path_cumulants, 'w') as table_file_cumulants:
-        # Write header for Single Exponential
-        header_single = "{:^26} {:^13} {:^23} {:^24} {:^24} {:^26} {:^25} {:^24}\n".format(
-            "Filename", "q (A^-1)", "Baseline", "beta", "Relax. rate (s-1)", "Relax. time (s)", "Diff. coefficient (u2/s)", "R2"
-        )
-        table_file_single.write(header_single)
-
-        # Write header for Stretched Exponential
-        header_stretched = "{:^26} {:^13} {:^23} {:^24} {:^24} {:^24} {:^26} {:^25} {:^24}\n".format(
-            "Filename", "q (A^-1)", "Baseline", "beta", "Relax. rate (s-1)", "Gamma", "Relax. time (s)", "Diff. coefficient (u2/s)", "R2"
-        )
-        table_file_stretched.write(header_stretched)
-
-        # Write header for Cumulants
-        header_cumulants = "{:^26} {:^13} {:^23} {:^24} {:^24} {:^24} {:^26} {:^25} {:^24}\n".format(
-            "Filename", "q (A^-1)", "Baseline", "beta", "Relax. rate (s-1)", "PDI", "Relax. time (s)", "Diff. coefficient (u2/s)", "R2"
-        )
-        table_file_cumulants.write(header_cumulants)
-
-        # Write table data for Single Exponential
-        for row_single in table_data_single:
-            row_str_single = "{:<26} {:<13} {:<23} {:<24} {:<24} {:<26} {:<25} {:<24}\n".format(*row_single)
-            table_file_single.write(row_str_single)
-
-        # Write table data for Stretched Exponential
-        for row_stretched in table_data_stretched:
-            row_str_stretched = "{:<26} {:<13} {:<23} {:<24} {:<24} {:<24} {:<26} {:<25} {:<24}\n".format(*row_stretched)
-            table_file_stretched.write(row_str_stretched)
-
-        # Write table data for Cumulants
-        for row_cumulants in table_data_cumulants:
-            row_str_cumulants = "{:<26} {:<13} {:<23} {:<24} {:<24} {:<24} {:<26} {:<25} {:<24}\n".format(*row_cumulants)
-            table_file_cumulants.write(row_str_cumulants)
-
-    print("Fit results tables generated successfully.")
-
     
