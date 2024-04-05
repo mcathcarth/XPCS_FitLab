@@ -685,7 +685,274 @@ def initialize_data_for_derived_params():
 #------ Interactive parameter selection block (for a single file) ------#
 #-----------------------------------------------------------------------#
 
+class GraphWindow_range:
+    """
+    Create an interactive graph window for q selection.
+
+    Attributes:
+        root (Tk): The root Tkinter window.
+        new_dataset_df (DataFrame): The dataset for graphing.
+        cmap (function): The color map function.
+        figure (Figure): The Matplotlib figure for the graph.
+        ax (Axes): The Matplotlib axes for the graph.
+        canvas (FigureCanvasTkAgg): The Matplotlib canvas for Tkinter.
+        lines_labels_dict (dict): Dictionary to store lines and labels information.
+    """
+    def __init__(self, root, dataset_df, cmap):
+        """Initialize the GraphWindow."""
+        # Initialize the root window
+        self.root = root
+        self.root.title("Define the range of 't'")
+
+        # Initialize q_buttons list
+        self.q_buttons = []
+
+        # Store dataset information
+        self.dataset_df = dataset_df
+        self.lower_limit = 0
+        self.upper_limit = len(dataset_df['# t']) - 1
+        self.cmap = cmap
+
+        # Create lines and labels dictionary
+        self.lines_labels_dict = {
+            "exp_lines": [],
+            "exp_labels": [],
+            "fit_lines": [],
+            "fit_labels": []
+        }
+
+        # Create the interactive graph
+        self.create_graph()
+
+        # Create the Define_range and Exit buttons
+        self.create_buttons()
+
+        # Center the window on the screen
+        self.root.update_idletasks()
+        width = self.root.winfo_reqwidth()
+        height = self.root.winfo_reqheight()
+        x = (self.root.winfo_screenwidth() - width) // 2
+        y = (self.root.winfo_screenheight() - height) // 2
+        self.root.geometry("+%d+%d" % (x, y))
+
+    def create_graph(self):
+        """Create the interactive graph."""
+        self.figure = Figure(figsize=(8, 6))
+        self.ax = self.figure.add_subplot(111)
+        self.canvas = FigureCanvasTkAgg(self.figure, master=self.root)
+        self.canvas.get_tk_widget().pack(side='top', fill='both', expand=1)
+        
+        # Iterate over the columns and adjust the code
+        for i, q_column in enumerate(self.dataset_df.columns[1:], 1):
+            
+            # Extract the q value from the column name
+            match = re.search(r"q=(\d+\.\d+)", q_column)
+            if match:
+                q_value = float(match.group(1))
+            
+            # Get the 't' and 'g2' data for the current q value
+            t = self.dataset_df['# t']
+            g2 = self.dataset_df[q_column]
+
+            # Slice the values of 't' and 'g2' using the provided indices
+            t = t.iloc[self.lower_limit:self.upper_limit + 1]
+            g2 = g2.iloc[self.lower_limit:self.upper_limit + 1]
+
+            # Fit the Single Exponential Model
+            fit_params, fitted_curve, r2_selq = fit_single_exponential(t, g2)
+                
+            A = fit_params[0]
+            B = fit_params[1]
+
+            ### Plot the experimental data and the fitted curves ###
+
+            color = self.cmap(i-1)  # Get color based on index
+                
+            # Plot experimental data points
+            line_exp = self.ax.semilogx(t, (g2 - A)/B, 'o', color=color)[0]
+
+            # Plot fitted curve
+            line_fit = self.ax.semilogx(t, (fitted_curve - A)/B, color=color, linestyle='-')[0]
+
+            # Add labels to the legend lists based on the model type
+            self.lines_labels_dict["exp_lines"].append(line_exp)
+            self.lines_labels_dict["exp_labels"].append(f"q = {q_value:.6f}")
+            self.lines_labels_dict["fit_lines"].append(line_fit)
+            self.lines_labels_dict["fit_labels"].append(f"R2: {r2_selq:.3f}")
+                
+        ### Configure the plot ###
+        
+        # Configure legend and title
+        self.ax.set_title('Correlation function fitting - Single Exponential Model')
+        self.ax.set_xlabel('Delay Time (s)')
+        self.ax.set_ylabel(r'$(g_2 - \mathrm{baseline}) / \beta$')
+        
+        # Add labels to the plot
+        # Combine q and R values
+        combined_labels = [f"{exp_label} - {fit_label}" for exp_label, fit_label in
+                           zip(self.lines_labels_dict["exp_labels"], self.lines_labels_dict["fit_labels"])]
+        
+        # Create the legend for experimental data
+        legend_exp = self.ax.legend(self.lines_labels_dict["exp_lines"], combined_labels,
+                                    loc='upper right', bbox_to_anchor=(1, 1), borderaxespad=0)
+        self.ax.add_artist(legend_exp)
+
+        self.canvas.draw()
+
+    def get_range_values(self):
+        """Get the range values."""
+        return self.lower_limit, self.upper_limit
+    
+    def select_range(self):
+        self.define_t_range = True
+        self.lower_limit, self.upper_limit = get_t_range_limits(self.dataset_df, self.define_t_range)
+        return self.lower_limit, self.upper_limit
+
+    def create_buttons(self):
+        """Create the Select and Exit buttons."""
+        ttk.Button(self.root, text="Define Range", command=self.select_range).pack(side='left', padx=10)
+        ttk.Button(self.root, text="Continue", command=self.get_range_values).pack(side='left', padx=10)
+        ttk.Button(self.root, text="Exit", command=self.exit_window).pack(side='right', padx=10)
+
+    def exit_window(self):
+        """Close the window without saving changes."""
+        self.root.destroy()
+
+
+class GraphWindow_range_1:
+    def __init__(self, root, new_dataset_df, cmap):
+        self.root = root
+        self.root.title("Define the range of 't'")
+        self.new_dataset_df = new_dataset_df
+        self.lower_limit = 0
+        self.upper_limit = len(new_dataset_df['# t']) - 1
+        self.cmap = cmap
+
+        self.lines_labels_dict = {
+            "exp_lines_selq": [],
+            "exp_labels_selq": [],
+            "fit_lines_selq": [],
+            "fit_labels_selq": []
+        }
+
+        self.root.update_idletasks()
+        width = self.root.winfo_reqwidth()
+        height = self.root.winfo_reqheight()
+        x = (self.root.winfo_screenwidth() - width) // 2
+        y = (self.root.winfo_screenheight() - height) // 2
+        self.root.geometry("+%d+%d" % (x, y))
+
+        # Create the initial graph
+        self.create_graph()
+
+    def create_graph(self):
+        self.figure = Figure(figsize=(8, 6))
+        self.ax = self.figure.add_subplot(111)
+        self.canvas = FigureCanvasTkAgg(self.figure, master=self.root)
+        self.canvas.get_tk_widget().pack(side='top', fill='both', expand=1)
+
+        self.plot_graph(self.ax, self.lower_limit, self.upper_limit)
+
+        ttk.Button(self.root, text="Define t Range", command=self.define_t_range).pack(side='bottom', pady=10)
+
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.root.mainloop()
+
+    def plot_graph(self, ax, lower_limit, upper_limit):
+        t_values = self.new_dataset_df['# t']
+        g2_values = self.new_dataset_df.iloc[:, 1:]
+
+        for i, q_column in enumerate(g2_values.columns, 1):
+            match = re.search(r"q=(\d+\.\d+)", q_column)
+            if match:
+                q_value = float(match.group(1))
+
+            t_q = t_values.iloc[lower_limit:upper_limit + 1]
+            g2_q = g2_values[q_column].iloc[lower_limit:upper_limit + 1]
+
+            fit_params_selq, fitted_curve_selq, r2_selq = fit_single_exponential(t_q, g2_q)
+
+            A_selq = fit_params_selq[0]
+            B_selq = fit_params_selq[1]
+
+            color = self.cmap(i-1)
+
+            line_exp_sq = ax.semilogx(t_q, (g2_q - A_selq) / B_selq, 'o', color=color)[0]
+            line_fit_sq = ax.semilogx(t_q, (fitted_curve_selq - A_selq) / B_selq, color=color, linestyle='-')[0]
+
+            self.lines_labels_dict["exp_lines_selq"].append(line_exp_sq)
+            self.lines_labels_dict["exp_labels_selq"].append(f"q = {q_value:.6f}")
+            self.lines_labels_dict["fit_lines_selq"].append(line_fit_sq)
+            self.lines_labels_dict["fit_labels_selq"].append(f"R2: {r2_selq:.3f}")
+
+        ax.set_title('Correlation function fitting - Single Exponential Model')
+        ax.set_xlabel('Delay Time (s)')
+        ax.set_ylabel(r'$(g_2 - \mathrm{baseline}) / \beta$')
+
+        combined_labels = [f"{exp_label} - {fit_label}" for exp_label, fit_label in
+                           zip(self.lines_labels_dict["exp_labels_selq"], self.lines_labels_dict["fit_labels_selq"])]
+
+        legend_exp = ax.legend(self.lines_labels_dict["exp_lines_selq"], combined_labels,
+                               loc='upper right', bbox_to_anchor=(1, 1), borderaxespad=0)
+        ax.add_artist(legend_exp)
+
+        self.canvas.draw()
+
+    def define_t_range(self):
+        user_response = self.ask_user_for_t_range()
+
+        if user_response:
+            self.get_t_range_limits(define_t_range=True)
+
+    def on_close(self):
+        user_response = messagebox.askyesno("Accept t Range", "Do you accept the current 't' range?")
+
+        if user_response:
+            self.root.destroy()
+            self.save_final_t_range()
+        else:
+            self.create_graph()
+
+    def save_final_t_range(self):
+        # Save the final 't' range values or perform any other necessary actions
+        # based on your specific requirements.
+        pass
+
+    def ask_user_for_t_range(self):
+        return messagebox.askyesno("Define Range", "Do you want to define the range of 't'?")
+
+    def get_t_range_limits(self, define_t_range=False):
+        if define_t_range:
+            range_dialog = tk.Toplevel(self.root)
+            range_dialog.title("Select 't' Range")
+
+            lower_limit_label = ttk.Label(range_dialog, text="Lower Limit:")
+            lower_limit_label.grid(row=0, column=0, padx=10, pady=10, sticky=tk.W)
+
+            lower_slider = ttk.Scale(range_dialog, from_=0, to=len(self.new_dataset_df['# t']) - 1, orient=tk.HORIZONTAL)
+            lower_slider.set(self.lower_limit)
+            lower_slider.grid(row=0, column=1, padx=10, pady=10)
+
+            upper_limit_label = ttk.Label(range_dialog, text="Upper Limit:")
+            upper_limit_label.grid(row=1, column=0, padx=10, pady=10, sticky=tk.W)
+
+            upper_slider = ttk.Scale(range_dialog, from_=0, to=len(self.new_dataset_df['# t']) - 1, orient=tk.HORIZONTAL)
+            upper_slider.set(self.upper_limit)
+            upper_slider.grid(row=1, column=1, padx=10, pady=10)
+
+            apply_button = ttk.Button(range_dialog, text="Apply", command=range_dialog.destroy)
+            apply_button.grid(row=2, column=0, columnspan=2, pady=10)
+
+            range_dialog.protocol("WM_DELETE_WINDOW", range_dialog.destroy)
+            range_dialog.mainloop()
+
+            self.lower_limit = int(lower_slider.get())
+            self.upper_limit = int(upper_slider.get())
+
+        return self.lower_limit, self.upper_limit
+
 # Class for creating an interactive graph window
+#class GraphWindow_wo_range:
 class GraphWindow:
     """
     Create an interactive graph window for q selection.
