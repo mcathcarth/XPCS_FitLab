@@ -1,5 +1,11 @@
+# XPCS_functions.py - Module containing essential functions for XPCS data analysis.
+
+# Author: Marilina Cathcarth [mcathcarth@gmail.com]
+# Version: 6.7
+# Date: September 3, 2024
+
 import tkinter as tk
-from tkinter import Canvas, messagebox, ttk
+from tkinter import messagebox, ttk
 from PyQt5.QtWidgets import QApplication, QFileDialog, QWidget, QVBoxLayout, QPushButton, QDesktopWidget
 import os
 import h5py
@@ -9,10 +15,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from functools import partial
 from scipy.optimize import curve_fit
 from sklearn.metrics import r2_score
 import warnings
 from scipy.stats import pearsonr
+
+from scipy.optimize import minimize
 
 #-----------------------------------------------------------------------#
 #--------------------- Directory and File Handling ---------------------#
@@ -21,30 +30,116 @@ from scipy.stats import pearsonr
 # Function to select synchrotron
 def select_synchrotron():
     """
-    Displays a GUI window to select a synchrotron and returns the selected synchrotron.
+    Displays a GUI window to select a synchrotron and returns the selected synchrotron and data type.
     
     Returns:
-        str: The selected synchrotron.
+        tuple: A tuple containing the selected synchrotron and data type.
     """
-    # Initialize the synchrotron variable
+    # Initialize variables
     synchrotron = None
+    data_type = None
 
     # Define the nested functions to set the synchrotron:
+    ### SIRIUS ###
     def set_sirius():
         nonlocal synchrotron         # Access the outer variable
         synchrotron = 'Sirius'       # Set the synchrotron to 'Sirius'
-        root.destroy()               # Close the GUI window
+        open_sirius_versions()       # Open window to select Sirius versions
 
-    def set_sirius_new():
-        nonlocal synchrotron
-        synchrotron = 'Sirius new'
+    def open_sirius_versions():
+        # Create a new window to select Sirius versions
+        sirius_window = tk.Toplevel(root)
+        sirius_window.title("Select Sirius Version")
+
+        # Set the window size and position it in the center of the screen
+        sirius_window_width = 300
+        sirius_window_height = 210
+        screen_width = root.winfo_screenwidth()
+        screen_height = root.winfo_screenheight()
+        sirius_x_position = (screen_width - window_width) // 2
+        sirius_y_position = (screen_height - window_height) // 2
+
+        sirius_window.geometry(f"{sirius_window_width}x{sirius_window_height}+{sirius_x_position}+{sirius_y_position}")
+        #sirius_window.geometry(root.geometry())  # Use the same geometry as the root window
+
+        # Create the label widget to display the instruction
+        label = tk.Label(sirius_window, text="Select the Sirius version:")
+        label.pack(pady=10)                 # Add some padding
+
+        # Create the buttons to select Sirius versions
+        sirius1_button = tk.Button(sirius_window, text="version 1 (May, 2023)", command=set_sirius_1)
+        sirius1_button.pack(pady=5)
+
+        sirius2_button = tk.Button(sirius_window, text="version 2 (October, 2023)", command=set_sirius_2)
+        sirius2_button.pack(pady=5)
+
+        sirius3_button = tk.Button(sirius_window, text="version 3 (January, 2024)", command=set_sirius_3)
+        sirius3_button.pack(pady=5)
+
+        sirius3m_button = tk.Button(sirius_window, text="version 3 (Average)", command=set_sirius_3m)
+        sirius3m_button.pack(pady=5)
+
+        # Bind the closing of the window to the on_closing function
+        sirius_window.protocol("WM_DELETE_WINDOW", on_closing)
+
+    def select_data_type(type):
+        nonlocal data_type
+        data_type = type
         root.destroy()
-        
+
+    def open_data_type_selection():
+        # Create a new window to select data type
+        data_type_window = tk.Toplevel(root)
+        data_type_window.title("Select Data Type")
+        # Set the window size and position it in the center of the screen
+        data_type_window_width = 200
+        data_type_window_height = 150
+        data_type_screen_width = root.winfo_screenwidth()
+        data_type_screen_height = root.winfo_screenheight()
+        data_type_x_position = (data_type_screen_width - data_type_window_width) // 2
+        data_type_y_position = (data_type_screen_height - data_type_window_height) // 2
+
+        data_type_window.geometry(f"{data_type_window_width}x{data_type_window_height}+{data_type_x_position}+{data_type_y_position}")
+
+        # Create a label widget to display the instruction
+        label = tk.Label(data_type_window, text="Select data type:")
+        label.pack(pady=10)                 # Add some padding
+
+        # Create the buttons to select data type
+        originals_button = tk.Button(data_type_window, text="Original Data", command=lambda: select_data_type("Originals"))
+        originals_button.pack(pady=5)
+
+        rebineds_button = tk.Button(data_type_window, text="Rebinned Data", command=lambda: select_data_type("Rebinneds"))
+        rebineds_button.pack(pady=5)
+
+    def set_sirius_1():
+        nonlocal synchrotron
+        synchrotron = 'Sirius 1'
+        root.destroy()
+
+    def set_sirius_2():
+        nonlocal synchrotron, data_type
+        synchrotron = 'Sirius 2'
+        root.destroy()
+
+    def set_sirius_3():
+        nonlocal synchrotron, data_type
+        synchrotron = 'Sirius 3'
+        open_data_type_selection()
+        #root.destroy()
+
+    def set_sirius_3m():
+        nonlocal synchrotron, data_type
+        synchrotron = 'Sirius 3 average'
+        open_data_type_selection()
+
+    ### APS ###
     def set_APS():
         nonlocal synchrotron
         synchrotron = 'APS'
         root.destroy()
 
+    ### ESRF ###
     def set_ESRF():
         nonlocal synchrotron
         synchrotron = 'ESRF'
@@ -53,7 +148,7 @@ def select_synchrotron():
     # Set synchrotron to None when the window is closed
     def on_closing():
         nonlocal synchrotron
-        synchrotron = None  
+        synchrotron = None
         root.destroy()
 
     # Create the main GUI window
@@ -62,14 +157,14 @@ def select_synchrotron():
 
     # Set the window size and position it in the center of the screen
     window_width = 300
-    window_height = 200
+    window_height = 180
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
     x_position = (screen_width - window_width) // 2
     y_position = (screen_height - window_height) // 2
 
     root.geometry(f"{window_width}x{window_height}+{x_position}+{y_position}")
-    
+
     # Create a label widget to display the instruction
     label = tk.Label(root, text="Select the synchrotron:")
     label.pack(pady=10)                 # Add some padding
@@ -78,9 +173,6 @@ def select_synchrotron():
     sirius_button = tk.Button(root, text="Sirius", command=set_sirius)
     sirius_button.pack(pady=5)
 
-    sirius_new_button = tk.Button(root, text="Sirius new", command=set_sirius_new)
-    sirius_new_button.pack(pady=5)
-    
     APS_button = tk.Button(root, text="APS", command=set_APS)
     APS_button.pack(pady=5)
 
@@ -89,11 +181,11 @@ def select_synchrotron():
 
     # Bind the closing of the window to the on_closing function
     root.protocol("WM_DELETE_WINDOW", on_closing)
-    
+
     # Start the main GUI event loop
     root.mainloop()
-    
-    return synchrotron
+
+    return synchrotron, data_type
 
 # Function to select a directory or files
 def select_directory_or_files():
@@ -192,18 +284,24 @@ def generate_base_name(selected_synchrotron, hdf5_file):
     Generates a base name for data processing based on the selected synchrotron.
 
     Parameters:
-        selected_synchrotron (str): The selected synchrotron name ('Sirius' or 'APS').
+        selected_synchrotron (str): The selected synchrotron name.
         hdf5_file (str): The HDF5 file name.
 
     Returns:
         str: The generated base name.
     """
-    if selected_synchrotron == 'Sirius':
+    if selected_synchrotron == 'Sirius 1':
         base_name = hdf5_file.replace('_saxs_0000_RESULTS.hdf5', '')
-    elif selected_synchrotron == 'Sirius new':
+    elif selected_synchrotron == 'Sirius 2':
         var = hdf5_file.split('_')
         n = var[-1].split('.')[0]
         base_name = '_'.join(var[:-3])+'_'+n
+    elif selected_synchrotron == 'Sirius 3':
+        var = hdf5_file.split('_')
+        n = var[-1].split('.')[0]
+        base_name = '_'.join(var[:-3])+'_'+n
+    elif selected_synchrotron == 'Sirius 3 average':
+        base_name = hdf5_file.replace('.hdf5', '')
     elif selected_synchrotron == 'APS':
         base_name = hdf5_file.replace('.hdf5', '')
     elif selected_synchrotron == 'ESRF':
@@ -212,9 +310,9 @@ def generate_base_name(selected_synchrotron, hdf5_file):
     return base_name
 
 # Function to process 'Multi-tau' data for Sirius
-def process_multi_tau_sirius(hdf):
+def process_multi_tau_sirius1(hdf):
     """
-    Process the 'Multi-tau' data for Sirius.
+    Process the 'Multi-tau' data for Sirius version 1.
 
     Parameters:
         hdf (h5py.File): The HDF5 file object.
@@ -237,10 +335,10 @@ def process_multi_tau_sirius(hdf):
     
     return multi_tau, dataset_keys
 
-# Function to process data from sirius
-def process_sirius_data(file_path):
+# Function to process data from sirius_v1
+def process_sirius1_data(file_path):
     """
-    Process data from an HDF5 file of 'Sirius' and generate a DataFrame with columns 't' and 'g2(q=X)'.
+    Process data from an HDF5 file of 'Sirius version 1' and generate a DataFrame with columns 't' and 'g2(q=X)'.
 
     Args:
         file_path (str): The path to the HDF5 file.
@@ -252,11 +350,11 @@ def process_sirius_data(file_path):
         # Open the HDF5 file
         with h5py.File(file_path, 'r') as hdf:
             # Get the dataset keys and multi-tau data
-            multi_tau, dataset_keys = process_multi_tau_sirius(hdf)
+            multi_tau, dataset_keys = process_multi_tau_sirius1(hdf)
 
             # Handle exceptions that may occur during data processing
             if multi_tau is None:
-                error_message = f"### Error ###:\nThe file does not belong to 'Sirius' or there is an issue with the data.\n{dataset_keys}"
+                error_message = f"### Error ###:\nThe file does not belong to 'Sirius version 1' or there is an issue with the data.\n{dataset_keys}"
                 print(error_message)
                 return None
             
@@ -314,25 +412,29 @@ def process_sirius_data(file_path):
         print(error_message)
         return None
     
-# Function to process data from sirius_new
-def process_sirius_new_data(file_path):
+# Function to process data from sirius_v2
+def process_sirius2_data(file_path):
     """
-    Process data from an HDF5 file of 'Sirius new' and generate a DataFrame with columns 't' and 'g2(q=X)' for each 'q'.
+    Process data from an HDF5 file of 'Sirius version 2' and generate DataFrames.
 
     Args:
         file_path (str): The path to the HDF5 file.
-
+        
     Returns:
-        pd.DataFrame: A DataFrame with columns 't' and 'g2(q=X)' for different 'q' values.
+        tuple: A tuple containing:
+            - pd.DataFrame: A DataFrame with columns 't' and 'g2(q=X)' for each 'q' values.
+            - dict: A dictionary containing DataFrames with columns 't1' and 't2' for each 'q' value.
     """
     try:
         with h5py.File(file_path, 'r') as hdf:
+            ### q values ###
             # Navigate to the 'Fitting results' directory
             fitting_results = hdf['Fitting results']
 
             # Get the 'q' values from the dataset 'q values (angstroms)'
             q_values = fitting_results['q values (angstroms)'][:]
 
+            ### t data ###
             # Navigate to the 'One-tome correlation function' directory
             one_time_corr_function = hdf['One-time correlation function']
 
@@ -348,16 +450,179 @@ def process_sirius_new_data(file_path):
                 g2_data = one_time_corr_function['1-TCF'][:, i + 1]
                 combined_df[f'g2(q={q_value})'] = g2_data
 
+            ### Two-time corralation ###
+            # Navigate to the 'Two-time correlation' directory
+            two_time_corr_function = hdf['Two-time correlation function']['2-TCF']
+
+            # Initialize dictionary to store t1 vs t2 DataFrames for each q
+            t1t2_dataframes = {}
+
+            # Iterate over the datasets within the group and the corresponding q values
+            for q, t1t2_dataset in zip(q_values, two_time_corr_function):
+                # Convert the dataset into a pandas DataFrame and transpose it
+                t1t2_df = pd.DataFrame(t1t2_dataset[:])
+                # Add the transposed DataFrame to the dictionary with q as the key
+                t1t2_dataframes[q] = t1t2_df
+
+        return combined_df, t1t2_dataframes
+    
+    # Handle exceptions that may occur during data processing
+    except (OSError, KeyError) as e:
+        error_message = f"### Error ###:\nThe file does not belong to 'Sirius version 2' or there is an issue with the data.\n{e}"
+        print(error_message)
+        return None, None
+    
+# Function to process data from sirius_v3 average data
+def process_sirius3m_data(file_path, data_type):
+    """
+    Process data from an HDF5 file of 'Sirius 3' and generate DataFrames.
+
+    Args:
+        file_path (str): The path to the HDF5 file.
+        data_type (str): The type of data to process. Options are 'Originals' or 'Rebineds'.
+
+    Returns:
+        pd.DataFrame: A DataFrame with columns 't' and 'g2(q=X)' for different 'q' values.
+    """
+    try:
+        with h5py.File(file_path, 'r') as hdf:
+            ### q values ###
+            # Navigate to the 'Fitting results' directory
+            fitting_results = hdf['Multi-tau Fitting results']
+
+            # Get the 'q' values from the dataset 'q values (angstroms)'
+            q_values = fitting_results['q values (angstroms)'][:]
+
+            ### t data ###
+            if data_type == 'Originals':
+                # Navigate to the 'One-time correlation' directory
+                one_time_corr_function = hdf['One-time correlation']
+
+                # Get the 't' data from the first column
+                t_data = one_time_corr_function['Average One-TCF'][:, 0]
+
+                # Initialize an empty DataFrame with 't' as the first column
+                combined_df = pd.DataFrame({'# t': t_data})
+
+                # Add 'g2' data for each 'q' to the DataFrame
+                for i in range(len(q_values)):
+                    q_value = q_values[i]
+                    g2_data = one_time_corr_function['Average One-TCF'][:, i + 1]
+                    combined_df[f'g2(q={q_value})'] = g2_data
+
+            elif data_type == 'Rebinneds':
+                # Navigate to the 'Multi-tau correlation' directory
+                multi_tau_corr_function = hdf['Multi-tau Correlation']
+
+                # Get the 't' data from the first column
+                t_data = multi_tau_corr_function['Multi-tau'][:, 0]
+
+                # Initialize an empty DataFrame with 't' as the first column
+                combined_df = pd.DataFrame({'# t': t_data})
+
+                # Add 'g2' data for each 'q' to the DataFrame
+                for i in range(len(q_values)):
+                    q_value = q_values[i]
+                    g2_data = multi_tau_corr_function['Average Multi-tau'][:, i + 1]
+                    combined_df[f'g2(q={q_value})'] = g2_data
+
         return combined_df
     
     # Handle exceptions that may occur during data processing
     except (OSError, KeyError) as e:
-        error_message = f"### Error ###:\nThe file does not belong to 'Sirius new' or there is an issue with the data.\n{e}"
+        error_message = f"### Error ###:\nThe file does not belong to 'Sirius 3 average data' or there is an issue with the data.\n{e}"
         print(error_message)
         return None
-        
+    
+# Function to process data from sirius_v3
+def process_sirius3_data(file_path,data_type):
+    """
+    Process data from an HDF5 file of 'Sirius 3' and generate DataFrames.
+
+    Args:
+        file_path (str): The path to the HDF5 file.
+        data_type (str): The type of data to process. Options are 'Originals' or 'Rebineds'.
+
+    Returns:
+        tuple: A tuple containing:
+            - pd.DataFrame: A DataFrame with columns 't' and 'g2(q=X)' for different 'q' values.
+            - dict: A dictionary containing DataFrames with columns 't1' and 't2' for each 'q' value.
+    """
+    try:
+        with h5py.File(file_path, 'r') as hdf:
+            ### q values ###
+            # Navigate to the 'Fitting results' directory
+            fitting_results = hdf['Multi-tau Fitting results']
+
+            # Get the 'q' values from the dataset 'q values (angstroms)'
+            q_values = fitting_results['q values (angstroms)'][:]
+
+            ### t data ###
+            if data_type == 'Originals':
+                # Navigate to the 'One-time correlation' directory
+                one_time_corr_function = hdf['One-time correlation']
+
+                # Get the 't' data from the first column
+                t_data = one_time_corr_function['1-TCF'][:, 0]
+
+                # Initialize an empty DataFrame with 't' as the first column
+                combined_df = pd.DataFrame({'# t': t_data})
+
+                # Add 'g2' data for each 'q' to the DataFrame
+                for i in range(len(q_values)):
+                    q_value = q_values[i]
+                    g2_data = one_time_corr_function['1-TCF'][:, i + 1]
+                    combined_df[f'g2(q={q_value})'] = g2_data
+
+            elif data_type == 'Rebinneds':
+                # Navigate to the 'Multi-tau correlation' directory
+                multi_tau_corr_function = hdf['Multi-tau Correlation']
+
+                # Get the 't' data from the first column
+                t_data = multi_tau_corr_function['Multi-tau'][:, 0]
+
+                # Initialize an empty DataFrame with 't' as the first column
+                combined_df = pd.DataFrame({'# t': t_data})
+
+                # Add 'g2' data for each 'q' to the DataFrame
+                for i in range(len(q_values)):
+                    q_value = q_values[i]
+                    g2_data = multi_tau_corr_function['Multi-tau'][:, i + 1]
+                    combined_df[f'g2(q={q_value})'] = g2_data
+
+            ### Two-time corralation ###
+            # Navigate to the 'Two-time correlation' directory
+            two_time_corr_function = hdf['Two-time correlation']['2-TCF']
+
+            # Initialize dictionary to store t1 vs t2 DataFrames for each q
+            t1t2_dataframes = {}
+
+            # Iterate over the datasets within the group and the corresponding q values
+            for q, t1t2_dataset in zip(q_values, two_time_corr_function):
+                # Convert the dataset into a pandas DataFrame and transpose it
+                t1t2_df = pd.DataFrame(t1t2_dataset[:])
+                # Add the transposed DataFrame to the dictionary with q as the key
+                t1t2_dataframes[q] = t1t2_df
+
+        return combined_df, t1t2_dataframes
+    
+    # Handle exceptions that may occur during data processing
+    except (OSError, KeyError) as e:
+        error_message = f"### Error ###:\nThe file does not belong to 'Sirius 3' or there is an issue with the data.\n{e}"
+        print(error_message)
+        return None, None
+                
 # Function to process data from APS
 def process_aps_data(file_path):
+    """
+    Process data from an HDF5 file of 'APS' and generate a DataFrame with columns 't' and 'g2(q=X)'.
+
+    Args:
+        file_path (str): The path to the HDF5 file.
+
+    Returns:
+        pd.DataFrame: A DataFrame with columns 't' and 'g2(q=X)' for different 'q' values.
+    """
     try:
         with h5py.File(file_path, 'r') as hdf:
             t_data = hdf['exchange']['tau'][:].squeeze()
@@ -524,6 +789,72 @@ def get_t_range_limits(dataset_df, define_t_range):
         # Use the full range of 't' values
         return 0, len(t_values) - 1
 
+# Function to prompt the user for defining the q values
+def ask_user_for_select_q():
+    """
+    Ask the user if they want to select the q values.
+
+    Returns:
+        bool: True if the user chooses 'Yes', False otherwise.
+    """
+    root = tk.Tk()
+    root.withdraw()
+
+    # Ask the user if they want to define the range
+    user_response = messagebox.askyesno("Select q Values", "Do you want to select q values?")
+
+    return user_response
+
+# Function to save DataFrame to a TSV file with the appropriate line terminator argument
+def save_dataframe_to_tsv(dataset_df, output_dataframe):
+    """
+    Save a pandas DataFrame to a TSV file, handling different line terminator arguments.
+
+    Args:
+        dataset_df (pandas.DataFrame): The DataFrame to be saved.
+        output_dataframe (str): The file path for the output TSV file.
+
+    Returns:
+        None
+
+    This function tries to save the DataFrame using the 'lineterminator' argument first.
+    If it fails due to a TypeError, it attempts to save the DataFrame using the 'line_terminator' argument.
+    This is done to handle different pandas versions, as the line terminator argument name has changed over time.
+    """
+    try:
+        # Try using 'lineterminator'
+        dataset_df.to_csv(output_dataframe, sep='\t', index=False, lineterminator='\n', header=True)
+    except TypeError:
+        # If that fails, use 'line_terminator'
+        dataset_df.to_csv(output_dataframe, sep='\t', index=False, line_terminator='\n', header=True)
+
+# Function to save t1-vs-t2 data to a TSV file
+def save_t1t2_data(t1t2_dfs, directory, base_name):
+    """
+    Save the t1-t2 DataFrames to TSV files in the 't1-vs-t2' directory.
+
+    Args:
+        t1t2_dfs (dict): A dictionary of t1-t2 DataFrames.
+        directory (str): The directory path where the files will be saved.
+        base_name (str): The base name for the files.
+
+    Returns:
+        None
+    """
+    # Create the new 't1-vs-t2' directory:
+    t1t2_directory = os.path.join(directory, 't1-vs-t2')
+    os.makedirs(t1t2_directory, exist_ok=True)
+
+    for i, (q, t1t2_df) in enumerate(t1t2_dfs.items(), start=1):
+        # Get the letter corresponding to the index
+        letter = chr(ord('a') + i - 1)
+        # Create the file name with the letter
+        t1t2_file = os.path.join(t1t2_directory, f"{base_name}_t1-t2_{letter}.dat")
+        # Save the DataFrame to the file with q as a comment in the first line
+        with open(t1t2_file, 'w') as f:
+            f.write(f"# q value: {q}\n")
+            t1t2_df.to_csv(f, sep='\t', index=False, header=False)
+
 #-----------------------------------------------------------------------#
 #--------------------------- Initializations ---------------------------#
 #-----------------------------------------------------------------------#
@@ -658,17 +989,32 @@ def initialize_plot(q_len):
 
     return fig1, (ax_single, ax_stretched, ax_cumulants, ax_Cq2_si, ax_Cq_si), fig2, (ax_Cq2_st, ax_Cq_st, ax_gammaq, ax_Cq2_cu, ax_Cq_cu, ax_PDIq), cmap, lines_labels_dict
 
-# Function to initialize empty data structures for derived parameters
+# Function to initialize empty data structures for derived and qualified parameters
 def initialize_data_for_derived_params():
     """
-    Initializes data structures for derived parameters, including Relaxation time (s) 
-    and Diffusion coefficient (u^2/s).
-   
+    Initializes two dictionaries to store derived and qualified parameters from the XPCS analysis.
+
     Returns:
-        dict: A dictionary with keys for derived parameters, 
-              each containing an empty list.
+        tuple: A tuple containing two dictionaries:
+            1. derived_params (dict): A dictionary to store derived parameters, including:
+                - q_value: List to store the q values
+                - q_square: List to store the squared q values
+                - relax_rate_single: List to store the relaxation rates from the single exponential model
+                - relax_rate_stretched: List to store the relaxation rates from the stretched exponential model
+                - gamma: List to store the gamma (stretching exponent) values from the stretched exponential model
+                - relax_rate_cumulants: List to store the relaxation rates from the cumulants method
+                - PDI: List to store the polydispersity index from the cumulants method
+            2. qualified_params (dict): A dictionary to store the qualified parameters, which are the parameters
+               from the fits that have an R-squared (R2) value greater than the R2_THRESHOLD. This dictionary includes:
+                - q_value: List to store the q values for qualified fits
+                - relax_rate_single: List to store the relaxation rates from the single exponential model for qualified fits
+                - relax_rate_stretched: List to store the relaxation rates from the stretched exponential model for qualified fits
+                - relax_rate_cumulants: List to store the relaxation rates from the cumulants method for qualified fits
+                - gamma: List to store the gammas from the stretched exponential model for qualified fits
+                - PDI: List to store the PDIs from the cumulants method for qualified fits
     """
-    # Initialize empty lists for relax_rate vs q^2 values
+
+    # Initialize empty lists for derived parameters
     derived_params = {
         "q_value": [],
         "q_square": [],   
@@ -678,281 +1024,29 @@ def initialize_data_for_derived_params():
         "relax_rate_cumulants": [],
         "PDI": []
     }
+
+    # Initialize empty lists for qualified parameters
+    qualified_params = {
+        "q_value_single": [],
+        "q_value_stretched": [],
+        "q_value_cumulants": [],
+        "relax_rate_single": [],
+        "relax_rate_stretched": [],
+        "relax_rate_cumulants": [],
+        "color_single": [],
+        "color_stretched": [],
+        "color_cumulants": [],
+        "gamma": [],
+        "PDI": []
+    }
         
-    return derived_params
+    return derived_params, qualified_params
 
 #-----------------------------------------------------------------------#
 #------ Interactive parameter selection block (for a single file) ------#
 #-----------------------------------------------------------------------#
 
-class GraphWindow_range:
-    """
-    Create an interactive graph window for q selection.
-
-    Attributes:
-        root (Tk): The root Tkinter window.
-        new_dataset_df (DataFrame): The dataset for graphing.
-        cmap (function): The color map function.
-        figure (Figure): The Matplotlib figure for the graph.
-        ax (Axes): The Matplotlib axes for the graph.
-        canvas (FigureCanvasTkAgg): The Matplotlib canvas for Tkinter.
-        lines_labels_dict (dict): Dictionary to store lines and labels information.
-    """
-    def __init__(self, root, dataset_df, cmap):
-        """Initialize the GraphWindow."""
-        # Initialize the root window
-        self.root = root
-        self.root.title("Define the range of 't'")
-
-        # Initialize q_buttons list
-        self.q_buttons = []
-
-        # Store dataset information
-        self.dataset_df = dataset_df
-        self.lower_limit = 0
-        self.upper_limit = len(dataset_df['# t']) - 1
-        self.cmap = cmap
-
-        # Create lines and labels dictionary
-        self.lines_labels_dict = {
-            "exp_lines": [],
-            "exp_labels": [],
-            "fit_lines": [],
-            "fit_labels": []
-        }
-
-        # Create the interactive graph
-        self.create_graph()
-
-        # Create the Define_range and Exit buttons
-        self.create_buttons()
-
-        # Center the window on the screen
-        self.root.update_idletasks()
-        width = self.root.winfo_reqwidth()
-        height = self.root.winfo_reqheight()
-        x = (self.root.winfo_screenwidth() - width) // 2
-        y = (self.root.winfo_screenheight() - height) // 2
-        self.root.geometry("+%d+%d" % (x, y))
-
-    def create_graph(self):
-        """Create the interactive graph."""
-        self.figure = Figure(figsize=(8, 6))
-        self.ax = self.figure.add_subplot(111)
-        self.canvas = FigureCanvasTkAgg(self.figure, master=self.root)
-        self.canvas.get_tk_widget().pack(side='top', fill='both', expand=1)
-        
-        # Iterate over the columns and adjust the code
-        for i, q_column in enumerate(self.dataset_df.columns[1:], 1):
-            
-            # Extract the q value from the column name
-            match = re.search(r"q=(\d+\.\d+)", q_column)
-            if match:
-                q_value = float(match.group(1))
-            
-            # Get the 't' and 'g2' data for the current q value
-            t = self.dataset_df['# t']
-            g2 = self.dataset_df[q_column]
-
-            # Slice the values of 't' and 'g2' using the provided indices
-            t = t.iloc[self.lower_limit:self.upper_limit + 1]
-            g2 = g2.iloc[self.lower_limit:self.upper_limit + 1]
-
-            # Fit the Single Exponential Model
-            fit_params, fitted_curve, r2_selq = fit_single_exponential(t, g2)
-                
-            A = fit_params[0]
-            B = fit_params[1]
-
-            ### Plot the experimental data and the fitted curves ###
-
-            color = self.cmap(i-1)  # Get color based on index
-                
-            # Plot experimental data points
-            line_exp = self.ax.semilogx(t, (g2 - A)/B, 'o', color=color)[0]
-
-            # Plot fitted curve
-            line_fit = self.ax.semilogx(t, (fitted_curve - A)/B, color=color, linestyle='-')[0]
-
-            # Add labels to the legend lists based on the model type
-            self.lines_labels_dict["exp_lines"].append(line_exp)
-            self.lines_labels_dict["exp_labels"].append(f"q = {q_value:.6f}")
-            self.lines_labels_dict["fit_lines"].append(line_fit)
-            self.lines_labels_dict["fit_labels"].append(f"R2: {r2_selq:.3f}")
-                
-        ### Configure the plot ###
-        
-        # Configure legend and title
-        self.ax.set_title('Correlation function fitting - Single Exponential Model')
-        self.ax.set_xlabel('Delay Time (s)')
-        self.ax.set_ylabel(r'$(g_2 - \mathrm{baseline}) / \beta$')
-        
-        # Add labels to the plot
-        # Combine q and R values
-        combined_labels = [f"{exp_label} - {fit_label}" for exp_label, fit_label in
-                           zip(self.lines_labels_dict["exp_labels"], self.lines_labels_dict["fit_labels"])]
-        
-        # Create the legend for experimental data
-        legend_exp = self.ax.legend(self.lines_labels_dict["exp_lines"], combined_labels,
-                                    loc='upper right', bbox_to_anchor=(1, 1), borderaxespad=0)
-        self.ax.add_artist(legend_exp)
-
-        self.canvas.draw()
-
-    def get_range_values(self):
-        """Get the range values."""
-        return self.lower_limit, self.upper_limit
-    
-    def select_range(self):
-        self.define_t_range = True
-        self.lower_limit, self.upper_limit = get_t_range_limits(self.dataset_df, self.define_t_range)
-        return self.lower_limit, self.upper_limit
-
-    def create_buttons(self):
-        """Create the Select and Exit buttons."""
-        ttk.Button(self.root, text="Define Range", command=self.select_range).pack(side='left', padx=10)
-        ttk.Button(self.root, text="Continue", command=self.get_range_values).pack(side='left', padx=10)
-        ttk.Button(self.root, text="Exit", command=self.exit_window).pack(side='right', padx=10)
-
-    def exit_window(self):
-        """Close the window without saving changes."""
-        self.root.destroy()
-
-
-class GraphWindow_range_1:
-    def __init__(self, root, new_dataset_df, cmap):
-        self.root = root
-        self.root.title("Define the range of 't'")
-        self.new_dataset_df = new_dataset_df
-        self.lower_limit = 0
-        self.upper_limit = len(new_dataset_df['# t']) - 1
-        self.cmap = cmap
-
-        self.lines_labels_dict = {
-            "exp_lines_selq": [],
-            "exp_labels_selq": [],
-            "fit_lines_selq": [],
-            "fit_labels_selq": []
-        }
-
-        self.root.update_idletasks()
-        width = self.root.winfo_reqwidth()
-        height = self.root.winfo_reqheight()
-        x = (self.root.winfo_screenwidth() - width) // 2
-        y = (self.root.winfo_screenheight() - height) // 2
-        self.root.geometry("+%d+%d" % (x, y))
-
-        # Create the initial graph
-        self.create_graph()
-
-    def create_graph(self):
-        self.figure = Figure(figsize=(8, 6))
-        self.ax = self.figure.add_subplot(111)
-        self.canvas = FigureCanvasTkAgg(self.figure, master=self.root)
-        self.canvas.get_tk_widget().pack(side='top', fill='both', expand=1)
-
-        self.plot_graph(self.ax, self.lower_limit, self.upper_limit)
-
-        ttk.Button(self.root, text="Define t Range", command=self.define_t_range).pack(side='bottom', pady=10)
-
-        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
-        self.root.mainloop()
-
-    def plot_graph(self, ax, lower_limit, upper_limit):
-        t_values = self.new_dataset_df['# t']
-        g2_values = self.new_dataset_df.iloc[:, 1:]
-
-        for i, q_column in enumerate(g2_values.columns, 1):
-            match = re.search(r"q=(\d+\.\d+)", q_column)
-            if match:
-                q_value = float(match.group(1))
-
-            t_q = t_values.iloc[lower_limit:upper_limit + 1]
-            g2_q = g2_values[q_column].iloc[lower_limit:upper_limit + 1]
-
-            fit_params_selq, fitted_curve_selq, r2_selq = fit_single_exponential(t_q, g2_q)
-
-            A_selq = fit_params_selq[0]
-            B_selq = fit_params_selq[1]
-
-            color = self.cmap(i-1)
-
-            line_exp_sq = ax.semilogx(t_q, (g2_q - A_selq) / B_selq, 'o', color=color)[0]
-            line_fit_sq = ax.semilogx(t_q, (fitted_curve_selq - A_selq) / B_selq, color=color, linestyle='-')[0]
-
-            self.lines_labels_dict["exp_lines_selq"].append(line_exp_sq)
-            self.lines_labels_dict["exp_labels_selq"].append(f"q = {q_value:.6f}")
-            self.lines_labels_dict["fit_lines_selq"].append(line_fit_sq)
-            self.lines_labels_dict["fit_labels_selq"].append(f"R2: {r2_selq:.3f}")
-
-        ax.set_title('Correlation function fitting - Single Exponential Model')
-        ax.set_xlabel('Delay Time (s)')
-        ax.set_ylabel(r'$(g_2 - \mathrm{baseline}) / \beta$')
-
-        combined_labels = [f"{exp_label} - {fit_label}" for exp_label, fit_label in
-                           zip(self.lines_labels_dict["exp_labels_selq"], self.lines_labels_dict["fit_labels_selq"])]
-
-        legend_exp = ax.legend(self.lines_labels_dict["exp_lines_selq"], combined_labels,
-                               loc='upper right', bbox_to_anchor=(1, 1), borderaxespad=0)
-        ax.add_artist(legend_exp)
-
-        self.canvas.draw()
-
-    def define_t_range(self):
-        user_response = self.ask_user_for_t_range()
-
-        if user_response:
-            self.get_t_range_limits(define_t_range=True)
-
-    def on_close(self):
-        user_response = messagebox.askyesno("Accept t Range", "Do you accept the current 't' range?")
-
-        if user_response:
-            self.root.destroy()
-            self.save_final_t_range()
-        else:
-            self.create_graph()
-
-    def save_final_t_range(self):
-        # Save the final 't' range values or perform any other necessary actions
-        # based on your specific requirements.
-        pass
-
-    def ask_user_for_t_range(self):
-        return messagebox.askyesno("Define Range", "Do you want to define the range of 't'?")
-
-    def get_t_range_limits(self, define_t_range=False):
-        if define_t_range:
-            range_dialog = tk.Toplevel(self.root)
-            range_dialog.title("Select 't' Range")
-
-            lower_limit_label = ttk.Label(range_dialog, text="Lower Limit:")
-            lower_limit_label.grid(row=0, column=0, padx=10, pady=10, sticky=tk.W)
-
-            lower_slider = ttk.Scale(range_dialog, from_=0, to=len(self.new_dataset_df['# t']) - 1, orient=tk.HORIZONTAL)
-            lower_slider.set(self.lower_limit)
-            lower_slider.grid(row=0, column=1, padx=10, pady=10)
-
-            upper_limit_label = ttk.Label(range_dialog, text="Upper Limit:")
-            upper_limit_label.grid(row=1, column=0, padx=10, pady=10, sticky=tk.W)
-
-            upper_slider = ttk.Scale(range_dialog, from_=0, to=len(self.new_dataset_df['# t']) - 1, orient=tk.HORIZONTAL)
-            upper_slider.set(self.upper_limit)
-            upper_slider.grid(row=1, column=1, padx=10, pady=10)
-
-            apply_button = ttk.Button(range_dialog, text="Apply", command=range_dialog.destroy)
-            apply_button.grid(row=2, column=0, columnspan=2, pady=10)
-
-            range_dialog.protocol("WM_DELETE_WINDOW", range_dialog.destroy)
-            range_dialog.mainloop()
-
-            self.lower_limit = int(lower_slider.get())
-            self.upper_limit = int(upper_slider.get())
-
-        return self.lower_limit, self.upper_limit
-
 # Class for creating an interactive graph window
-#class GraphWindow_wo_range:
 class GraphWindow:
     """
     Create an interactive graph window for q selection.
@@ -1019,7 +1113,7 @@ class GraphWindow:
 
     def create_graph(self):
         """Create the interactive graph."""
-        self.figure = Figure(figsize=(8, 6))
+        self.figure = Figure(figsize=(8, 5))
         self.ax = self.figure.add_subplot(111)
         self.canvas = FigureCanvasTkAgg(self.figure, master=self.root)
         self.canvas.get_tk_widget().pack(side='top', fill='both', expand=1)
@@ -1083,30 +1177,43 @@ class GraphWindow:
 
     def create_q_selector(self):
         """Create the q value selector checkboxes."""
+        # Create a frame to contain the q value selector checkboxes
+        q_frame = ttk.Frame(self.root)
+        q_frame.pack(side='top', fill='both', expand=True)
+
+        # Create a canvas to allow scrolling for q value selector checkboxes
+        q_canvas = tk.Canvas(q_frame)
+        q_canvas.pack(side='left', fill='both', expand=True)
+
+        # Create a scrollbar for the canvas
+        q_scrollbar = ttk.Scrollbar(q_frame, orient="vertical", command=q_canvas.yview)
+        q_scrollbar.pack(side='right', fill='y')
+
+        # Create a frame to contain the q value selector checkboxes inside the canvas
+        inner_frame = ttk.Frame(q_canvas)
+        q_canvas.create_window((0, 0), window=inner_frame, anchor='nw')
+
+        # Create q value selector checkboxes
         for i, q_column in enumerate(self.new_dataset_df.columns[1:], 1):
-            # Use regular expression to extract q value
             match = re.search(r"q=(\d+\.\d+)", q_column)
             if match:
                 q_value = float(match.group(1))
-
-                # Initially selected state
-                #initial_state = tk.NORMAL
-
-                # Create a custom style for the Checkbutton
-                style = ttk.Style()
-                style.configure("TCheckbutton", indicatorrelief="flat", relief="flat")
-
-                btn_var = tk.BooleanVar(value=True)  # Use a separate BooleanVar
-                btn = ttk.Checkbutton(self.root, text=f'q = {q_value:.6f}', style="TCheckbutton",
-                                    variable=btn_var, #state=initial_state,
+                btn_var = tk.BooleanVar(value=True)
+                btn = ttk.Checkbutton(inner_frame, text=f'q = {q_value:.6f}', variable=btn_var,
                                     command=lambda q=q_value, var=btn_var: self.toggle_curve(q, var))
-
-                btn.invoke()  # Invoke the button to set its initial state
-
-                btn.pack()
-
-                # Append the button and its associated variable to the q_buttons list
+                btn.invoke()
+                btn.pack(side='top', padx=5, pady=2)
                 self.q_buttons.append((btn, btn_var))
+
+        # Update the size of the inner_frame to match its contents
+        inner_frame.update_idletasks()
+        q_canvas.config(scrollregion=q_canvas.bbox("all"))
+        q_canvas.config(yscrollcommand=q_scrollbar.set)
+        q_canvas.bind('<Configure>', lambda event, q_canvas=q_canvas: q_canvas.configure(scrollregion=q_canvas.bbox("all")))
+
+        # Create a frame to contain the Select and Exit buttons
+        button_frame = ttk.Frame(self.root)
+        button_frame.pack(side='bottom', fill='x')
 
     def toggle_curve(self, q_value, var):
         """Toggle visibility of the curve for the specified q value."""
@@ -1138,8 +1245,8 @@ class GraphWindow:
 
     def create_buttons(self):
         """Create the Select and Exit buttons."""
-        ttk.Button(self.root, text="Select", command=self.select_values).pack(side='left', padx=10)
-        ttk.Button(self.root, text="Exit", command=self.exit_window).pack(side='right', padx=10)
+        ttk.Button(self.root, text="Select", command=self.select_values).pack(side='right', padx=10)
+        ttk.Button(self.root, text="Exit", command=self.exit_window).pack(side='left', padx=10)
 
     def select_values(self):
         """Save the selected values and close the window."""
@@ -1223,7 +1330,7 @@ def fit_model_with_constraints(t, g2, model_func, initial_params):
         return fit_params, fitted_curve, r2
     except (RuntimeError, ValueError):
         return np.full(len(initial_params), np.nan), np.full(len(t), np.nan), np.nan
-    
+
 # Single Exponential Model function
 def single_exponential(t, A, B, C):
     """
@@ -1255,7 +1362,7 @@ def stretched_exponential(t, A, B, C, gamma):
     Returns:
         array-like: The fitted curve.
     """
-    return A + B * np.exp(-2 * C * t) ** gamma
+    return A + B * np.exp(-2 * (C * t) ** gamma)
 
 # Cumulants Model function
 def cumulants_model(t, A, B, C1, C2):
@@ -1303,8 +1410,10 @@ def fit_single_exponential(t, g2):
     initial_params_single = [A0, B0, C0]
 
     # Fit the curve g2 = A + B * exp(-2C * t)
+    # With constraints
     fit_params_single, fitted_curve_single, r2_single = fit_model_with_constraints(t, g2, single_exponential, initial_params_single)
-    #fit_params_single0, fitted_curve_single0, r2_single0 = fit_model(t, g2, single_exponential, initial_params_single)
+    # Without constraints
+    #fit_params_single, fitted_curve_single, r2_single = fit_model(t, g2, single_exponential, initial_params_single)
 
     return fit_params_single, fitted_curve_single, r2_single
 
@@ -1328,9 +1437,11 @@ def fit_stretched_exponential(t, g2, fit_params_single):
     initial_params_stretched = [*fit_params_single, gamma0]
 
     # Fit the curve g2 = A + B * exp(-2C * t)**gamma
+    # With constraints
     fit_params_stretched, fitted_curve_stretched, r2_stretched = fit_model_with_constraints(t, g2, stretched_exponential, initial_params_stretched)
-    #fit_params_stretched0, fitted_curve_stretched0, r2_stretched0 = fit_model(t, g2, stretched_exponential, initial_params_stretched)
-        
+    # Without constraints
+    #fit_params_stretched, fitted_curve_stretched, r2_stretched = fit_model(t, g2, stretched_exponential, initial_params_stretched)
+
     return fit_params_stretched, fitted_curve_stretched, r2_stretched
 
 # Function to fit a cumulants model to the provided data
@@ -1353,8 +1464,10 @@ def fit_cumulants(t, g2, fit_params_single):
     initial_params_cumulants = [*fit_params_single, C2_0]
 
     # Fit the curve g2 = A + B * exp(-2C1 * t)*(1 + (1/2)* C2 * t**2)**2
+    # With constraints
     fit_params_cumulants, fitted_curve_cumulants, r2_cumulants = fit_model_with_constraints(t, g2, cumulants_model, initial_params_cumulants)
-    #fit_params_cumulants0, fitted_curve_cumulants0, r2_cumulants0 = fit_model(t, g2, cumulants_model, initial_params_cumulants)
+    # Without constraints
+    #fit_params_cumulants, fitted_curve_cumulants, r2_cumulants = fit_model(t, g2, cumulants_model, initial_params_cumulants)
         
     return fit_params_cumulants, fitted_curve_cumulants, r2_cumulants
 
@@ -1724,15 +1837,15 @@ def plot_data_and_curves(ax, t, g2, baseline, Beta, fitted_curve, q_value, r2_va
     lines_labels_dict[f"fit_labels_{model_type.lower()}"].append(f"R2: {r2_value:.3f}")
 
 # Define the function to fit and plot a specified model
-def fit_and_plot_model(x_values, relax_rate_values, ax, cmap, label, model_type='linear'):
+def fit_and_plot_model(q_values, relax_rate_values, ax, colors, label, model_type='linear'):
     """
     Fit a model to given data and generate a plot on a specified subplot
 
     Args:
-        x_values (array-like): Array of q2 or q values.
+        q_values (array-like): Array of q values.
         relax_rate_values (array-like): Array of corresponding relaxation rates.
         ax (matplotlib.axes.Axes): The subplot where the plot will be generated.
-        cmap (matplotlib.colors.Colormap): Colormap for line colors.
+        colors (list): List of colors for each data point.
         label (str): Label for the plot
         model_type (str, optional): Type of model to fit. Supported values are 'linear' or 'exponential'. Defaults to 'linear'.
 
@@ -1744,24 +1857,23 @@ def fit_and_plot_model(x_values, relax_rate_values, ax, cmap, label, model_type=
     """
     try:
         if model_type == 'linear':
+            # Use q_value**2 as the x-values for the linear fit
+            x_values = [q**2 for q in q_values]
             # Call the function to perform the linear fit
             D, r_metric, std_err = fit_linear_model(x_values, relax_rate_values)
             n = np.nan  # For consistency, set n to NaN for linear fits
         elif model_type == 'exponential':
+            # Use q_value as the x-values for the exponential fit
+            x_values = q_values
             # Call the function to perform the exponential fit
             D, n, r_metric, std_err_D, std_err_n = fit_exponential_model(x_values, relax_rate_values)
             std_err = (std_err_D, std_err_n)  # Standard error for exponential fits
         else:
             raise ValueError("Invalid model_type. Supported values are 'linear' or 'exponential'.")
 
-        # Create a color palette with the number of points
-        n_points = len(x_values)
-
         # Plot the model data
-        for i in range(n_points):
-            color = cmap(i)
-            
-            line_data = ax.plot(x_values[i], relax_rate_values[i], 'o', color=color, markersize=10, label='')[0]
+        for x, y, color in zip(x_values, relax_rate_values, colors):
+            ax.plot(x, y, 'o', color=color, markersize=10)
 
         # Define the exponential function for fitting
         def exponential_function(q, D, n):
@@ -1779,22 +1891,14 @@ def fit_and_plot_model(x_values, relax_rate_values, ax, cmap, label, model_type=
             fit_line = None
 
         # Plot the fit line
-        #ax.plot(q_fit, fit_line, linestyle='-', color='black', label=f"{model_type.capitalize()} Fit")
-        ax.plot(q_fit, fit_line, linestyle='-', color='black', label='')
-
-        # Remove the legend if it exists
-        legend = ax.get_legend()
-        if legend:
-            legend.remove()
+        ax.plot(q_fit, fit_line, linestyle='-', color='black', label=f"{model_type.capitalize()} Fit")
+        #ax.plot(q_fit, fit_line, linestyle='-', color='black')
 
         # Set the axes to start from zero
         ax.set_xlim(0, (max(x_values) + 0.1 * max(x_values)))
         ax.set_ylim(0, max(relax_rate_values) * 1.1)
         #ax.set_ylim(0, (max(relax_rate_values) + 0.1 * max(relax_rate_values)))
 
-        # Disable legend not found warning
-        warnings.resetwarnings()
-        
         return D, n, r_metric, std_err
 
     except ValueError as e:
@@ -1834,7 +1938,7 @@ def plot_params(q_values, y_values, ax, cmap, param_type):
         # Set y-axis limits with a small margin
         elif param_type.lower() == 'pdi':
             y_margin = 0.1 * (max(y_values) - min(y_values))
-            ax.set_ylim(min(y_values) - y_margin, max(y_values) + y_margin)
+            ax.set_ylim(min(y_values) - y_margin, max(y_values) + y_margin)  
 
     except ValueError as e:
         print(f"Error plotting points: {e}")
