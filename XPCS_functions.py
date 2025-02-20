@@ -1,8 +1,8 @@
 # XPCS_functions.py - Module containing essential functions for XPCS data analysis.
 
 # Author: Marilina Cathcarth [mcathcarth@gmail.com]
-# Version: 6.7
-# Date: September 3, 2024
+# Version: 6.8
+# Date: December 17, 2024
 
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -20,8 +20,8 @@ from scipy.optimize import curve_fit
 from sklearn.metrics import r2_score
 import warnings
 from scipy.stats import pearsonr
-
-from scipy.optimize import minimize
+from functools import partial
+#from scipy.optimize import minimize
 
 #-----------------------------------------------------------------------#
 #--------------------- Directory and File Handling ---------------------#
@@ -611,6 +611,65 @@ def process_sirius3_data(file_path,data_type):
         error_message = f"### Error ###:\nThe file does not belong to 'Sirius 3' or there is an issue with the data.\n{e}"
         print(error_message)
         return None, None
+
+# Function to process data from sirius_v3
+def process_sirius3_fit(file_path,data_type):
+    """
+    Process fitting results (KWW) from a 'Sirius 3' HDF5 file and generate a DataFrame.
+
+    Args:
+        file_path (str): The path to the HDF5 file.
+        data_type (str): The type of data to process. Options are 'Originals' or 'Rebinneds'.
+
+    Returns:
+        pd.DataFrame or None: A DataFrame with columns 'q_values', 'Baseline', 'Beta', 'Relax time', and 'Gamma'.
+                              Returns None if an error occurs.
+    """
+    try:
+        with h5py.File(file_path, 'r') as hdf:
+
+            if data_type == 'Originals':
+                # Navigate to the 'One-time Fitting results' directory
+                fitting_results = hdf['One-time Fitting results']
+
+            elif data_type == 'Rebinneds':
+                # Navigate to the 'Multi-tau Fitting results' directory
+                fitting_results = hdf['Multi-tau Fitting results']
+
+            ### q values ###
+            # Get the 'q' values from the dataset 'q values (angstroms)'
+            q_values = fitting_results['q values (angstroms)'][:]
+
+            ### Parameters ###
+            
+            # Get Basaline
+            baseline = fitting_results['Baseline'][:]
+
+            # Get Beta
+            beta = fitting_results['Beta'][:]
+
+            # Get Relax time
+            relax_time = fitting_results['Relaxation time (s)'][:]
+
+            # Get Gamma
+            gamma = fitting_results['Gamma'][:]
+
+            # Create a DataFrame
+            fit_results_df = pd.DataFrame({
+                'q_values': q_values,
+                'Baseline': baseline,
+                'Beta': beta,
+                'Relax_time': relax_time,
+                'Gamma': gamma
+            })
+
+        return fit_results_df
+    
+    # Handle exceptions that may occur during data processing
+    except (OSError, KeyError) as e:
+        error_message = f"### Error ###:\nThere is an issue with the data.\n{e}"
+        print(error_message)
+        return None
                 
 # Function to process data from APS
 def process_aps_data(file_path):
@@ -909,6 +968,58 @@ def initialize_data_for_parameter_averages():
         }
     }
     return av_params
+
+# Function to initialize dictionary and list for fit parameters
+def initialize_fit(fit_results_df):
+    """
+    Initializes the Fit parameters dictionary and the fit variations list.
+    
+    This function processes a pandas DataFrame containing fit results from an HDF5 file
+    and creates a dictionary mapping each q-value to its corresponding fit parameters.
+    Additionally, it initializes an empty list to store the percentage variations
+    of fit parameters between HDF5 data and code-generated fits.
+    
+    Args:
+        fit_results_df (pd.DataFrame): 
+            A pandas DataFrame containing HDF5 fit results with the following columns:
+            - 'q_values': The q-values (float).
+            - 'Baseline_hdf5': Baseline parameter from HDF5 fit (float).
+            - 'Beta_hdf5': Beta parameter from HDF5 fit (float).
+            - 'Relax_time_hdf5': Relaxation time from HDF5 fit (float).
+            - 'Gamma_hdf5': Gamma parameter from HDF5 fit (float).
+    
+    Returns:
+        tuple: 
+            - fit_parameters_dict (dict): 
+                A dictionary where each key is a q-value and the value is another dictionary containing:
+                - 'Baseline': Baseline parameter from HDF5.
+                - 'Beta': Beta parameter from HDF5.
+                - 'Relax_time': Relaxation time from HDF5.
+                - 'Gamma': Gamma parameter from HDF5.
+            - fit_variations (list): 
+                An empty list intended to store dictionaries of percentage variations for each fit parameter per q-value.
+    """
+    # Initialize an empty dictionary to store the mapping of q_values to fit parameters
+    fit_parameters_dict = {}
+    
+    # Iterate over each row in the HDF5 fit results DataFrame
+    for _, row in fit_results_df.iterrows():
+        # Extract the q-value
+        #q = round(row['q_values'], 6)
+        q = row['q_values']
+        
+        # Map the q-value to its corresponding fit parameters
+        fit_parameters_dict[q] = {
+            'Baseline': row['Baseline'],
+            'Beta': row['Beta'],
+            'Relax_time': row['Relax_time'],
+            'Gamma': row['Gamma']
+        }
+    
+    # Initialize an empty list to store the fit parameter variations
+    fit_variations = []
+    
+    return fit_parameters_dict, fit_variations
 
 # Function to initialize a plot
 def initialize_plot(q_len):
@@ -1316,13 +1427,19 @@ def fit_model_with_constraints(t, g2, model_func, initial_params):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")  # Ignore warnings
 
-            # Restriction for parameter A based on the model
+            # Restriction for parameters A B C X based on the model
             if model_func.__name__ == 'single_exponential':
                 bounds = ([0, -np.inf, -np.inf], [np.inf, np.inf, np.inf])  # A>0
             elif model_func.__name__ == 'stretched_exponential':
                 bounds = ([0, -np.inf, -np.inf, 0], [np.inf, np.inf, np.inf, np.inf])  # A>0 gamma>0 
+                #bounds = ([0, 0, -np.inf, 0], [2, 1, np.inf, 5]) 
+            elif model_func.__name__ == 'stretched_exponential_refine':
+                bounds = ([0, 0], [np.inf, np.inf])                            # C > 0, gamma > 0
+                model_func.__name__ = 'stretched_exponential'
             elif model_func.__name__ == 'cumulants_model':
                 bounds = ([0, -np.inf, -np.inf, 0], [np.inf, np.inf, np.inf, np.inf])  # A>0 C2>0
+            elif model_func.__name__ == 'cumulants_model_refine':
+                bounds = ([0, 0], [np.inf, np.inf])  # A>0 C2>0
 
             fit_params, _ = curve_fit(model_func, t, g2, p0=initial_params, bounds=bounds)
         fitted_curve = model_func(t, *fit_params)
@@ -1418,7 +1535,7 @@ def fit_single_exponential(t, g2):
     return fit_params_single, fitted_curve_single, r2_single
 
 # Function to fit a stretched exponential model to the provided data
-def fit_stretched_exponential(t, g2, fit_params_single):
+def fit_stretched_exponentialX(t, g2, fit_params_single):
     """
     Fit a stretched exponential model to the provided data.
 
@@ -1444,8 +1561,56 @@ def fit_stretched_exponential(t, g2, fit_params_single):
 
     return fit_params_stretched, fitted_curve_stretched, r2_stretched
 
+# Function to fit a stretched exponential model to the provided data
+def fit_stretched_exponential(t, g2, fit_params_single):
+    """
+    Refine the stretched exponential fit using fixed A and B from the single-exponential fit.
+    In this step, only C and gamma are fitted, keeping A and B fixed.
+
+    The model is:
+        g2(t) = A + B * exp(-2 * (C * t)^gamma)
+
+    Parameters:
+        t (array-like): The time values.
+        g2 (array-like): The experimental g2 data.
+        fit_params_single (array-like): Parameters [A, B, C] obtained from the single exponential fit.
+
+    Returns:
+        tuple: (fit_params, fitted_curve, r2)
+            fit_params: array-like, [A, B, C, gamma]
+            fitted_curve: array-like, the fitted curve
+            r2: float, R² score of the fit
+    """
+    # Extract A, B, C from the single_exponential fit
+    A, B, C_single = fit_params_single
+
+    # Initial guesses for C and gamma:
+    C0 = C_single
+    gamma0 = 1.0
+    initial_params = [C0, gamma0]
+
+    # Prepare the model with fixed A and B
+    def stretched_exponential(t, C, gamma, A, B):
+        return A + B * np.exp(-2 * (C * t) ** gamma)
+
+    model_func = partial(stretched_exponential, A=A, B=B)
+    model_func.__name__ = 'stretched_exponential_refine'  # For fit_model_with_constraints
+
+    # Fit with constraints
+    fit_params, fitted_curve, r2 = fit_model_with_constraints(t, g2, model_func, initial_params)
+
+    # fit_params currently contains [C, gamma]
+    # We want [A, B, C, gamma]
+    if not np.isnan(fit_params).any():
+        C_fit, gamma_fit = fit_params
+        fit_params_full = [A, B, C_fit, gamma_fit]
+    else:
+        fit_params_full = [np.nan, np.nan, np.nan, np.nan]
+
+    return fit_params_full, fitted_curve, r2
+
 # Function to fit a cumulants model to the provided data
-def fit_cumulants(t, g2, fit_params_single):
+def fit_cumulantsX(t, g2, fit_params_single):
     """
     Fit a cumulants model to the provided data.
 
@@ -1470,6 +1635,52 @@ def fit_cumulants(t, g2, fit_params_single):
     #fit_params_cumulants, fitted_curve_cumulants, r2_cumulants = fit_model(t, g2, cumulants_model, initial_params_cumulants)
         
     return fit_params_cumulants, fitted_curve_cumulants, r2_cumulants
+
+def fit_cumulants(t, g2, fit_params_single):
+    """
+    Fit a cumulants model to the provided data using fixed A and B from the single exponential fit.
+    
+    The model is:
+        g2(t) = A + B * exp(-2 * C1 * t) * (1 + 0.5 * C2 * t^2)^2
+    
+    Parameters:
+        t (array-like): Time values.
+        g2 (array-like): Experimental g2 data.
+        fit_params_single (array-like): Parameters [A, B, C1] from the single exponential fit.
+    
+    Returns:
+        tuple: (fit_params_full, fitted_curve, r2)
+            fit_params_full (list): [A, B, C1, C2]
+            fitted_curve (array-like): The fitted g2(t) curve.
+            r2 (float): Coefficient of determination.
+    """
+    # Extract A, B, and C1 from the single exponential fit
+    A, B, C1_single = fit_params_single
+    
+    # Initial guesses for C1 and C2
+    C1_0 = C1_single
+    C2_0 = 0.05 * (C1_0)**2  
+    initial_params = [C1_0, C2_0]
+
+    # Prepare the model with fixed A and B
+    def cumulants_model(t, C1, C2, A, B):
+        return A + B * np.exp(-2 * C1 * t) * (1 + (1 / 2) * C2 * t**2)**2
+    
+    # Since A and B are fixed, we can use partial to fix these parameters
+    model_func = partial(cumulants_model, A=A, B=B)
+    model_func.__name__ = 'cumulants_model_refine'  # For fit_model_with_constraints
+
+    # Fit with constraints
+    fit_params, fitted_curve, r2 = fit_model_with_constraints(t, g2, model_func, initial_params)
+
+    # fit_params contains [C1, C2]
+    if not np.isnan(fit_params).any():
+        C1_fit, C2_fit = fit_params
+        fit_params_full = [A, B, C1_fit, C2_fit]
+    else:
+        fit_params_full = [np.nan, np.nan, np.nan, np.nan]
+    
+    return fit_params_full, fitted_curve, r2
 
 # Define the function that will perform the linear fit and return the parameters
 def fit_linear_model(q_squared_values, C_values):
@@ -1558,6 +1769,72 @@ def fit_exponential_model(q_values, C_values):
     except (RuntimeError, ValueError):
         # Handle fitting errors, e.g., NaN or infinite values
         return np.nan, np.nan, np.nan, np.nan, np.nan
+
+# Function to compare the code fit parameters with those of the beamline
+def compare_fit_parameters(q_value, beamline_params, code_params):
+    """
+    Compares fit parameters from HDF5 data and code-generated data for the Stretched Exponential model.
+    Calculates the percentage variation for each parameter.
+
+    Args:
+        q_value (float): The q-value being compared.
+        beamline_params (dict): Dictionary containing HDF5 fit parameters.
+        code_params (dict): Dictionary containing code-generated fit parameters.
+
+    Returns:
+        dict: Dictionary containing the percentage variations.
+    """
+    variation = {}
+    try:
+        variation['q_value'] = q_value
+        # Calculate percentage variations for each parameter
+        for param in ['Baseline', 'Beta', 'Relax_time', 'Gamma']:
+            hdf5_value = beamline_params[param]
+            code_value = code_params[param]
+            if hdf5_value != 0:
+                variation[f'{param}_variation_%'] = ((code_value - hdf5_value) / hdf5_value) * 100
+            else:
+                variation[f'{param}_variation_%'] = float('nan')  # Avoid division by zero
+    except Exception as e:
+       #print(f"### Error ###: Failed to calculate variation for q = {q_value} A^-1. Error: {e}")
+        variation = {
+            'q_value': q_value,
+            'Baseline_variation_%': float('nan'),
+            'Beta_variation_%': float('nan'),
+            'Relax_time_variation_%': float('nan'),
+            'Gamma_variation_%': float('nan')
+        }
+    return variation
+
+##
+def plot_fit_variations(variations_df):
+    """
+    Plots the percentage variations of fit parameters.
+
+    Args:
+        variations_df (pd.DataFrame): DataFrame containing percentage variations.
+    """
+    plt.figure(figsize=(12, 8))
+    
+    # Define the parameters to plot
+    parameters = ['Baseline_variation_%', 'Beta_variation_%', 'Relax_time_variation_%', 'Gamma_variation_%']
+    labels = ['Baseline', 'Beta', 'Relax Time', 'Gamma']
+    markers = ['o', 's', '^', 'D']
+    
+    # Plot each parameter's variation
+    for param, label, marker in zip(parameters, labels, markers):
+        plt.plot(variations_df['q_value'], variations_df[param], marker=marker, linestyle='-', label=label)
+    
+    # Set plot labels and title
+    plt.xlabel('q (A$^{-1}$)', fontsize=14)
+    plt.ylabel('Percentage Variation (%)', fontsize=14)
+    plt.title('Percentage Variation of Fit Parameters per q-value', fontsize=16)
+    
+    # Add legend and grid
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
 
 #-----------------------------------------------------------------------#
 #------------------ Calculations and Data Processing -------------------#
@@ -1738,6 +2015,8 @@ def print_summary(counters):
         for file_name in counters['invalid_files']:
             print(file_name)
     
+    counters['success'] = counters['q_values'] - counters['failure']
+
     print(f"Successful fits: {counters['success']}")
     print(f"Failed fits: {counters['failure']}")
 

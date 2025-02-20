@@ -5,9 +5,9 @@
 # 
 # **Author:** Marilina Cathcarth [mcathcarth@gmail.com]
 # 
-# **Version:** 6.7
+# **Version:** 6.8
 # 
-# **Date:** September 3, 2024
+# **Date:** December 17, 2024
 # 
 # **Important Note:**
 # 
@@ -52,8 +52,9 @@ import os
 import sys
 from XPCS_functions import select_synchrotron, select_directory_or_files, generate_base_name
 from XPCS_functions import ask_user_for_t_range, get_t_range_limits, ask_user_for_select_q
-from XPCS_functions import initialize_error_and_success_counters, save_dataframe_to_tsv, save_t1t2_data
-from XPCS_functions import process_sirius1_data, process_sirius2_data, process_sirius3_data, process_sirius3m_data, process_aps_data, process_esrf_data
+from XPCS_functions import initialize_error_and_success_counters, save_dataframe_to_tsv, save_t1t2_data, initialize_fit
+from XPCS_functions import process_sirius1_data, process_sirius2_data, process_sirius3_data, process_sirius3m_data, process_sirius3_fit
+from XPCS_functions import process_aps_data, process_esrf_data
 import warnings
 import tkinter as tk
 from XPCS_functions import GraphWindow
@@ -61,7 +62,7 @@ from XPCS_functions import initialize_data_for_parameter_averages, initialize_pl
 import pandas as pd
 import matplotlib.pyplot as plt
 import re
-from XPCS_functions import fit_single_exponential, fit_stretched_exponential, fit_cumulants, fit_and_plot_model
+from XPCS_functions import fit_single_exponential, fit_stretched_exponential, fit_cumulants, fit_and_plot_model, compare_fit_parameters
 import math
 from XPCS_functions import calculate_relaxation_and_diffusion
 from XPCS_functions import add_data_to_table, write_dat_file
@@ -82,6 +83,23 @@ R2_threshold = 0.9
 
 # Default directory (can be left empty)
 directory = ''
+# Default directory for output data (can be left empty)
+# If left empty, the output data will be saved in the same directory as the input data.
+out_dir = ''
+
+# Manually set synchrotron version and data type to avoid GUI; leave all commented to enable window selection
+## SIRIUS
+# version 1 (May, 2023)
+#selected_synchrotron, data_type = 'Sirius 1', None
+# version 2 (October, 2023)
+#selected_synchrotron, data_type = 'Sirius 2', None
+# version 3 (January, 2024)
+#selected_synchrotron = 'Sirius 3'
+# version 3 (January, 2024)(Average)
+#selected_synchrotron = 'Sirius 3 average'
+# For version 3 select data type:
+#data_type = 'Originals'
+#data_type = 'Rebinneds'
 
 # Get the list of .hdf5 files in the directory (if directory is defined)
 if directory:
@@ -124,9 +142,6 @@ table_data = {
 
 # Flag to indicate the first iteration of the loop
 first_iteration = True
-
-# Flag to control whether the loop should repeat
-repite_loop = True #VER
     
 # Variable to store the user's choice for defining the range
 define_t_range = ask_user_for_t_range()
@@ -161,35 +176,46 @@ for hdf5_file in hdf5_files:
     #**************************************************************#
     # Obtain g2 vs. t data for each q value and create a DataFrame #
     #**************************************************************#
-    
-    # Process 'Sirius version 1' data and get the DataFrame
-    if selected_synchrotron == 'Sirius 1':
-        dataset_df = process_sirius1_data(file_path)
-        
-    # Process 'Sirius version 2' data and get the DataFrame
-    elif selected_synchrotron == 'Sirius 2':
-        dataset_df, t1t2_dfs = process_sirius2_data(file_path)
-        
-    # Process 'Sirius version 3' data and get the DataFrame
-    elif selected_synchrotron == 'Sirius 3':
-        dataset_df, t1t2_dfs = process_sirius3_data(file_path,data_type)
 
-    # Process 'Sirius version 3m' data and get the DataFrame
-    elif selected_synchrotron == 'Sirius 3 average':
-        dataset_df = process_sirius3m_data(file_path,data_type)
+    try:
+        # Process 'Sirius version 1' data and get the DataFrame
+        if selected_synchrotron == 'Sirius 1':
+            dataset_df = process_sirius1_data(file_path)
+            
+        # Process 'Sirius version 2' data and get the DataFrame
+        elif selected_synchrotron == 'Sirius 2':
+            dataset_df, t1t2_dfs = process_sirius2_data(file_path)
+            
+        # Process 'Sirius version 3' data and get the DataFrame
+        elif selected_synchrotron == 'Sirius 3':
+            dataset_df, t1t2_dfs = process_sirius3_data(file_path,data_type)
+            # Get the beamline fit parameters
+            fit_results_df = process_sirius3_fit(file_path, data_type)
+            # Initialize the dictionary mapping q_values to fit parameters and the fit variations list
+            fit_parameters_dict, fit_variations = initialize_fit(fit_results_df)
     
-    # Process 'APS' data and get the DataFrame
-    elif selected_synchrotron == 'APS':
-        dataset_df = process_aps_data(file_path)
+        # Process 'Sirius version 3m' data and get the DataFrame
+        elif selected_synchrotron == 'Sirius 3 average':
+            dataset_df = process_sirius3m_data(file_path,data_type)
         
-    # Process 'ESRF' data and get the DataFrame
-    elif selected_synchrotron == 'ESRF':
-        dataset_df = process_esrf_data(file_path)
-    
-    # Check if the DataFrame is None, indicating a failure in data processing
-    if dataset_df is None:
-        sys.exit()        # Terminate the program to handle the error or exception
+        # Process 'APS' data and get the DataFrame
+        elif selected_synchrotron == 'APS':
+            dataset_df = process_aps_data(file_path)
+            
+        # Process 'ESRF' data and get the DataFrame
+        elif selected_synchrotron == 'ESRF':
+            dataset_df = process_esrf_data(file_path)
         
+        # Check if the DataFrame is None, indicating a failure in data processing
+        if dataset_df is None:
+            print(f"Warning: Data could not be processed for file '{hdf5_file}'. Skipping.")
+            #sys.exit()        # Terminate the program to handle the error or exception
+            continue           # Skip to the next file in the loop
+
+    except Exception as e:
+        print(f"Warning: Could not process file '{hdf5_file}'. Reason: {e}")
+        continue  # Skip this file and proceed with the next one
+            
     # +++ Increment the q_values counter +++
     q_count = dataset_df.shape[1] - 1       # Subtract 1 to exclude the 't' column
     counters['q_values'] += q_count     
@@ -203,7 +229,10 @@ for hdf5_file in hdf5_files:
     #***** Save the data to a .dat file (CSV format with tab delimiter) *****#
             
     # Specify the output file path
-    output_dataframe = os.path.join(directory, f"{base_name}_export_DataFrame.dat")
+    if out_dir:                             # Check if out_dir is defined (not empty)
+        output_dataframe = os.path.join(out_dir, f"{base_name}_export_DataFrame.dat")
+    else: 
+        output_dataframe = os.path.join(directory, f"{base_name}_export_DataFrame.dat")
 
     warnings.filterwarnings("ignore")
     #warnings.filterwarnings("ignore", category=FutureWarning)
@@ -221,7 +250,10 @@ for hdf5_file in hdf5_files:
 
     # Save t1-t2 DataFrame to a tab-separated values (TSV) file for Sirius 3 in t1-vs-t2 directory
     if selected_synchrotron == 'Sirius 2' or selected_synchrotron == 'Sirius 3':
-        save_t1t2_data(t1t2_dfs, directory, base_name)
+        if out_dir:
+            save_t1t2_data(t1t2_dfs, out_dir, base_name)
+        else:
+            save_t1t2_data(t1t2_dfs, directory, base_name)
 
     #--------------------- Initializations ---------------------#
     
@@ -256,7 +288,7 @@ for hdf5_file in hdf5_files:
 
             # Start the Tkinter event loop
             root.mainloop()
-
+    
             # Get the updated dataset after closing the window
             dataset_df = graph_window.select_values()
 
@@ -298,7 +330,14 @@ for hdf5_file in hdf5_files:
         output_name = f"{base_name}_export_{chr(ord('a')+i-1)}.dat"
 
         # Generate the complete output file path
-        output_path = os.path.join(directory, output_name)
+        if out_dir:
+            output_path = os.path.join(out_dir, output_name)
+        else:
+            output_path = os.path.join(directory, output_name)
+
+        if selected_synchrotron == 'Sirius 3':
+            # Retrieve beamline fit parameters for the current q_value
+            beamline_fit_params = fit_parameters_dict.get(q_value, None)
         
         #------------------------------------------------------#
         #--------------------- Fit models ---------------------#
@@ -440,9 +479,21 @@ for hdf5_file in hdf5_files:
             qualified_params["PDI"].append(PDI_cumulants)
             
         #****************************************************************#                        
-            
-        counters['success'] += 1  # +++ Increment the hdf5_file counter +++
         
+        #------------- Compare Beamline Fit Parameters for Sirius 3 -------------#
+        
+        if selected_synchrotron == 'Sirius 3':
+            # Extract code-generated fit parameters
+            code_fit_params = {'Baseline': A_stretched, 'Beta': B_stretched, 'Relax_time': relax_time_stretched, 'Gamma': gamma_stretched}
+
+            # Perform the comparison
+            variation = compare_fit_parameters(q_value, beamline_fit_params, code_fit_params)
+
+            # Append the variation to the list
+            fit_variations.append(variation)
+
+        #------------- -------------------------------------------- -------------#
+    
     ########################################################################
     ##################### Fit and plot derived params  #####################
     ########################################################################
@@ -631,7 +682,10 @@ for hdf5_file in hdf5_files:
     
     # Save the figures to a PDF file with two pages
     pdf_name = f"{base_name}.pdf"
-    output_pdf_path = os.path.join(directory, pdf_name)
+    if out_dir:
+        output_pdf_path = os.path.join(out_dir, pdf_name)
+    else:
+        output_pdf_path = os.path.join(directory, pdf_name)
 
     with PdfPages(output_pdf_path) as pdf:
         # Save the first figure and its subplots
@@ -650,6 +704,18 @@ for hdf5_file in hdf5_files:
     # Save the DataFrame to a .dat file
     dataset_df.to_csv(output_dataframe, sep='\t', index=False)
 
+    if selected_synchrotron == 'Sirius 3':
+        # Convert fit_variations to a DataFrame
+        variations_df = pd.DataFrame(fit_variations)
+
+        # Save the variations DF to a .dat file
+        if out_dir:
+            variations_output_path = os.path.join(out_dir, f"{base_name}_fit_variations.dat")
+        else:
+            variations_output_path = os.path.join(directory, f"{base_name}_fit_variations.dat")
+        
+        variations_df.to_csv(variations_output_path, sep='\t', index=False)
+
 plt.close()
 plt.close()
     
@@ -658,4 +724,10 @@ print_summary(counters)
 
 # Generate the new .dat files with the fit results tables for each model
 generate_fit_results_tables(directory, table_data["single"], table_data["stretched"], table_data["cumulants"])
+
+
+# In[ ]:
+
+
+
 
