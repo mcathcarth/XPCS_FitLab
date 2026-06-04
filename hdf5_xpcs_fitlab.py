@@ -1,49 +1,50 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# # HDF5 XPCS FitLab - Script for analyzing X-ray Photon Correlation Spectroscopy (XPCS) data from HDF5 files.
+# # HDF5 XPCS FitLab - Tool for analyzing X-ray Photon Correlation Spectroscopy (XPCS) data from HDF5 files.
 # 
-# **Author:** Marilina Cathcarth [mcathcarth@gmail.com]
+# **Author:** Marilina Cathcarth [[mcathcarth@gmail.com](mailto:mcathcarth@gmail.com)]
 # 
 # **Version:** 6.8
 # 
-# **Date:** December 17, 2024
+# **Date:** June 2026
 # 
 # **Important Note:**
 # 
-# This script relies on functions defined in the 'XPCS_functions.py' file. Please ensure that 'XPCS_functions.py' is located in the same directory as this script for proper execution.
+# This script relies on functions defined in the `XPCS_functions.py` file. Please ensure that `XPCS_functions.py` is located in the same directory as this script or notebook for proper execution.
 # 
 # **Dependencies:**
 # 
-# - Python (version >= 3.6)
-# - h5py (to work with HDF5 files)
-# - numpy (for numerical calculations)
-# - scipy (for curve fitting)
-# - scikit-learn (for calculating R2 score)
-# - matplotlib (for data visualization)
-# - qtpy (for GUI-based directory selection)
-# - pandas (for data manipulation)
-# - PyQt5 (for GUI)
-# - tk (for GUI)
-# - functools (for function manipulation)
-#   
+# * Python (version >= 3.8)
+# * h5py (to work with HDF5 files)
+# * numpy (for numerical calculations)
+# * scipy (for curve fitting)
+# * scikit-learn (for calculating R² scores)
+# * matplotlib (for data visualization)
+# * pandas (for data manipulation)
+# * tkinter (for the graphical user interface; usually included with Python)
+# 
 # **Installation:**
 # 
-# 1. Make sure you have Python 3.6 or later installed. If not, download and install Python from [Python Downloads](https://www.python.org/downloads/).
+# 1. Make sure you have Python 3.8 or later installed.
 # 
-# 2. Install the required packages using pip. Open a terminal or command prompt and run the following command:
+# 2. Install the required Python packages using pip:
 # 
-#     ```bash
-#     pip install h5py numpy scipy scikit-learn matplotlib qtpy pandas PyQt5 tk
-#     ```
-#     .
-# 4. Place the 'XPCS_functions.py' file in the same directory as this script to enable its functions for proper execution.
+#    ```bash
+#    pip install h5py numpy scipy scikit-learn matplotlib pandas
+#    ```
 # 
-# You're now ready to run the script for your XPCS analysis.
+# 3. Make sure Tkinter is available in your Python installation. On some Linux systems, it may need to be installed separately:
 # 
-# **Note:** If you encounter any issues, please ensure that all dependencies are correctly installed, and the 'XPCS_functions.py' file is in the same directory.
+#    ```bash
+#    sudo apt install python3-tk
+#    ```
 # 
-# Make sure to follow these instructions for successful execution of your XPCS analysis script.
+# 4. Place the `XPCS_functions.py` file in the same directory as this script or notebook.
+# 
+# You are now ready to run the script for your XPCS analysis.
+# 
+# **Note:** If you encounter any issues, please ensure that all dependencies are correctly installed and that `XPCS_functions.py` is located in the same directory as the main script or notebook.
 
 # In[ ]:
 
@@ -54,7 +55,7 @@ from XPCS_functions import select_synchrotron, select_directory_or_files, genera
 from XPCS_functions import ask_user_for_t_range, get_t_range_limits, ask_user_for_select_q
 from XPCS_functions import initialize_error_and_success_counters, save_dataframe_to_tsv, save_t1t2_data, initialize_fit
 from XPCS_functions import process_sirius1_data, process_sirius2_data, process_sirius3_data, process_sirius3m_data, process_sirius3_fit
-from XPCS_functions import process_aps_data, process_esrf_data
+from XPCS_functions import process_aps_data, process_esrf_data, clean_series
 import warnings
 import tkinter as tk
 from XPCS_functions import GraphWindow
@@ -66,9 +67,9 @@ from XPCS_functions import fit_single_exponential, fit_stretched_exponential, fi
 import math
 from XPCS_functions import calculate_relaxation_and_diffusion
 from XPCS_functions import add_data_to_table, write_dat_file
-from XPCS_functions import update_parameter_tracking_r
+from XPCS_functions import update_parameter_tracking_r, calculate_average_parameter_values
 from statistics import mean, stdev, StatisticsError
-from XPCS_functions import plot_data_and_curves, plot_params, configure_subplot, calculate_text_position, calculate_average_parameter_values
+from XPCS_functions import plot_data_and_curves, plot_params, configure_subplot, calculate_text_position, add_text_best_position 
 from matplotlib.backends.backend_pdf import PdfPages
 from XPCS_functions import print_summary, generate_fit_results_tables
 
@@ -103,7 +104,7 @@ out_dir = ''
 
 # Get the list of .hdf5 files in the directory (if directory is defined)
 if directory:
-    hdf5_files = [file for file in os.listdir(directory) if file.endswith('.hdf5')]
+    hdf5_files = [file for file in os.listdir(directory) if file.lower().endswith(('.hdf5', '.h5'))]
 
 # Get the selected synchrotron and data
 selected_synchrotron, data_type = select_synchrotron()
@@ -220,11 +221,19 @@ for hdf5_file in hdf5_files:
     q_count = dataset_df.shape[1] - 1       # Subtract 1 to exclude the 't' column
     counters['q_values'] += q_count     
     
-    # Define the range (slider shown on the first iteration if user chooses)
+    # Define the range.
+    # If only one file is processed, show the graphical preview.
+    # If multiple files are processed, use the simple slider only once.
     if first_iteration:
-    #if first_iteration and multiple_files:
-        lower_limit, upper_limit = get_t_range_limits(dataset_df, define_t_range)
-        first_iteration = False                  # Set the flag to False             
+        show_range_preview = len(hdf5_files) == 1
+
+        lower_limit, upper_limit = get_t_range_limits(
+            dataset_df,
+            define_t_range,
+            show_preview=show_range_preview
+        )
+
+        first_iteration = False                 # Set the flag to False             
     
     #***** Save the data to a .dat file (CSV format with tab delimiter) *****#
             
@@ -319,6 +328,14 @@ for hdf5_file in hdf5_files:
         # Get the 't' and 'g2' data for the current q value
         t = dataset_df['# t']
         g2 = dataset_df[q_column]
+        
+        # Clean it
+        t, g2 = clean_series(t, g2, min_points=8, return_pandas=True)
+
+        # If too few points remain -> skip this q
+        if t is None:
+            #failed_list.append((base_name, q_value))
+            continue
 
         # If the user has chosen to define the range of 't', apply the specified lower and upper limits
         if define_t_range:
@@ -461,7 +478,13 @@ for hdf5_file in hdf5_files:
             qualified_params["q_value_single"].append(q_value)
             qualified_params["relax_rate_single"].append(C_single)
             qualified_params["color_single"].append(color)
-        
+
+        elif not math.isnan(r2_single):
+            counters['below_threshold'] += 1
+            counters['below_threshold_files'].append(
+                f"{base_name} - q = {q_value} A^-1 - Single Exponential - R2 = {r2_single:.3f}"
+            )
+
         # Check if r2_stretched is not NaN and if it's greater than R2_threshold before updating parameter tracking.
         if not math.isnan(r2_stretched) and r2_stretched > R2_threshold:
             update_parameter_tracking_r(parameter_averages_data, 'stretched', r2_stretched, diffusion_coef_stretched, gamma_stretched)
@@ -470,6 +493,12 @@ for hdf5_file in hdf5_files:
             qualified_params["color_stretched"].append(color)
             qualified_params["gamma"].append(gamma_stretched)
 
+        elif not math.isnan(r2_stretched):
+            counters['below_threshold'] += 1
+            counters['below_threshold_files'].append(
+                f"{base_name} - q = {q_value} A^-1 - Stretched Exponential - R2 = {r2_stretched:.3f}"
+            )
+
         # Check if r2_cumulants is not NaN and if it's greater than R2_threshold before updating parameter tracking.
         if not math.isnan(r2_cumulants) and r2_cumulants > R2_threshold:
             update_parameter_tracking_r(parameter_averages_data, 'cumulants', r2_cumulants, diffusion_coef_cumulants, PDI_cumulants)         
@@ -477,6 +506,12 @@ for hdf5_file in hdf5_files:
             qualified_params["relax_rate_cumulants"].append(C1_cumulants)
             qualified_params["color_cumulants"].append(color)
             qualified_params["PDI"].append(PDI_cumulants)
+
+        elif not math.isnan(r2_cumulants):
+            counters['below_threshold'] += 1
+            counters['below_threshold_files'].append(
+                f"{base_name} - q = {q_value} A^-1 - Cumulants - R2 = {r2_cumulants:.3f}"
+            )
             
         #****************************************************************#                        
         
@@ -640,9 +675,10 @@ for hdf5_file in hdf5_files:
     if parameter_averages_data['single']['R count'] > 0:
         average_single_parameters = calculate_average_parameter_values(parameter_averages_data, 'single') 
         
-        # Add average parameter values to Single Exponential subplot
-        ax_single.text(1, diff_coef_pos, fr"Av. Diff Coef ($\mu m^{2}/s$): {average_single_parameters['Diff_coef av']:.4f} ({average_single_parameters['Diff_coef std']:.4f})",
-                          transform=ax_single.transAxes, va='top', ha='right', fontsize=12)        
+        # Add average parameter values to Single Exponential subplot    
+        add_text_best_position(
+            ax_single, f"Av. Diff Coef ($\\mu$m$^2$/s): "f"{average_single_parameters['Diff_coef av']:.4f} "
+            f"({average_single_parameters['Diff_coef std']:.4f})",fontsize=12)
 
     # Configure subplot for Stretched Exponential
     configure_subplot(ax_stretched, "Stretched Exponential", "Delay Time (s)", r"$(g_2 - \mathrm{base}) / \beta$",
@@ -655,11 +691,13 @@ for hdf5_file in hdf5_files:
     if parameter_averages_data['stretched']['R count'] > 0:
         average_stretched_parameters = calculate_average_parameter_values(parameter_averages_data, 'stretched')
         
-        # Add average parameter values to Stretched Exponential subplot       
-        ax_stretched.text(1, diff_coef_pos, fr"Av. Diff Coef ($\mu m^{2}/s$): {average_stretched_parameters['Diff_coef av']:.4f} ({average_stretched_parameters['Diff_coef std']:.4f})",
-                          transform=ax_stretched.transAxes, va='top', ha='right', fontsize=12)
-        ax_stretched.text(1, diff_coef_pos-0.045, f"Av. Gamma: {average_stretched_parameters['Gamma av']:.4f} ({average_stretched_parameters['Gamma std']:.4f})", 
-                          transform=ax_stretched.transAxes, va='top', ha='right', fontsize=12)
+        # Add average parameter values to Stretched Exponential subplot
+        add_text_best_position(
+            ax_stretched, f"Av. Diff Coef ($\\mu$m$^2$/s): "
+            f"{average_stretched_parameters['Diff_coef av']:.4f} "f"({average_stretched_parameters['Diff_coef std']:.4f})\n"
+            f"Av. Gamma: "
+            f"{average_stretched_parameters['Gamma av']:.4f} "f"({average_stretched_parameters['Gamma std']:.4f})",
+            fontsize=12)
 
     # Configure subplot for Cumulants model
     configure_subplot(ax_cumulants, "Cumulants", "Delay Time (s)", r"$(g_2 - \mathrm{base}) / \beta$",
@@ -673,10 +711,12 @@ for hdf5_file in hdf5_files:
         average_cumulants_parameters = calculate_average_parameter_values(parameter_averages_data, 'cumulants')
         
         # Add average parameter values to Cumulants subplot
-        ax_cumulants.text(1, diff_coef_pos, fr"Av. Diff Coef ($\mu m^{2}/s$): {average_cumulants_parameters['Diff_coef av']:.4f} ({average_cumulants_parameters['Diff_coef std']:.4f})", 
-                          transform=ax_cumulants.transAxes, va='top', ha='right', fontsize=12)
-        ax_cumulants.text(1, diff_coef_pos-0.045, f"Av. PDI: {average_cumulants_parameters['PDI av']:.4f} ({average_cumulants_parameters['PDI std']:.4f})", 
-                          transform=ax_cumulants.transAxes, va='top', ha='right', fontsize=12)
+        add_text_best_position(
+            ax_cumulants, f"Av. Diff Coef ($\\mu$m$^2$/s): "
+            f"{average_cumulants_parameters['Diff_coef av']:.4f} "f"({average_cumulants_parameters['Diff_coef std']:.4f})\n"
+            f"Av. PDI: "
+            f"{average_cumulants_parameters['PDI av']:.4f} "f"({average_cumulants_parameters['PDI std']:.4f})",
+            fontsize=12)
 
     ###############################################
     
@@ -720,7 +760,7 @@ plt.close()
 plt.close()
     
 # Print the counts, filed files and invalid files
-print_summary(counters)
+print_summary(counters, directory=directory, r2_threshold=R2_threshold)
 
 # Generate the new .dat files with the fit results tables for each model
 generate_fit_results_tables(directory, table_data["single"], table_data["stretched"], table_data["cumulants"])

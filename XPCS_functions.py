@@ -2,11 +2,10 @@
 
 # Author: Marilina Cathcarth [mcathcarth@gmail.com]
 # Version: 6.8
-# Date: December 17, 2024
+# Date: June, 2026
 
 import tkinter as tk
-from tkinter import messagebox, ttk
-from PyQt5.QtWidgets import QApplication, QFileDialog, QWidget, QVBoxLayout, QPushButton, QDesktopWidget
+from tkinter import messagebox, ttk, filedialog
 import os
 import h5py
 import pandas as pd
@@ -190,75 +189,115 @@ def select_synchrotron():
 # Function to select a directory or files
 def select_directory_or_files():
     """
-    Displays a GUI window to select a directory or individual files and returns the selected directory path and list of files.
+    Display a Tkinter window to select either a directory or individual HDF5 files.
 
     Returns:
-        str: The selected directory path.
-        list: List of selected files.
+        tuple:
+            - directory_path (str): Path to the selected directory.
+            - selected_files (list): List of selected HDF5 filenames.
     """
-    app = QApplication([])
-
-    layout = QVBoxLayout()
-
-    directory_button = QPushButton("Select Directory")
-    files_button = QPushButton("Select Files")
-
     directory_path = ""
     selected_files = []
 
-    # Function to select a directory
+    def center_window(window, width=300, height=130):
+        """Center a Tkinter window on the screen."""
+        screen_width = window.winfo_screenwidth()
+        screen_height = window.winfo_screenheight()
+        x_position = (screen_width - width) // 2
+        y_position = (screen_height - height) // 2
+        window.geometry(f"{width}x{height}+{x_position}+{y_position}")
+
+    def close_window():
+        """Close the selection window safely."""
+        try:
+            root.destroy()
+        except tk.TclError:
+            pass
+
     def select_directory():
-        nonlocal directory_path
-        directory_path = QFileDialog.getExistingDirectory(None, "Select Directory")
-        # Close the window after the user has made a selection
-        window.close()
+        """Select a directory and collect all HDF5 files inside it."""
+        nonlocal directory_path, selected_files
 
-    # Function to select specific files
-    def select_files():
-        nonlocal selected_files, directory_path
-        # Get the selected file paths
-        selected_file_paths, _ = QFileDialog.getOpenFileNames(None, "Select Files", "", "HDF5 Files (*.hdf5);;All Files (*)")
+        selected_path = filedialog.askdirectory(
+            parent=root,
+            title="Select Directory"
+        )
 
-        if not selected_file_paths:
-            # If no files were selected, set the directory path to an empty string
-            directory_path = ""
+        if selected_path:
+            directory_path = selected_path
+            selected_files = [
+                os.path.basename(file)
+                for file in os.listdir(directory_path)
+                if file.lower().endswith((".hdf5", ".h5"))
+            ]
         else:
-            # Set the directory path to the common directory of the selected files
+            directory_path = ""
+            selected_files = []
+
+        close_window()
+
+    def select_files():
+        """Select individual HDF5 files."""
+        nonlocal directory_path, selected_files
+
+        selected_file_paths = filedialog.askopenfilenames(
+            parent=root,
+            title="Select Files",
+            filetypes=[
+                ("HDF5 files", "*.hdf5 *.h5"),
+                ("All files", "*.*")
+            ]
+        )
+
+        if selected_file_paths:
             directory_path = os.path.dirname(selected_file_paths[0])
+            selected_files = [
+                os.path.basename(file_path)
+                for file_path in selected_file_paths
+            ]
+        else:
+            directory_path = ""
+            selected_files = []
 
-            # Extract only the filenames (without the path) from the selected file paths
-            selected_files.extend([os.path.basename(file_path) for file_path in selected_file_paths])
+        close_window()
 
-        # Close the window after the user has made a selection
-        window.close()
+    def cancel_selection():
+        """Cancel file selection."""
+        nonlocal directory_path, selected_files
+        directory_path = ""
+        selected_files = []
+        close_window()
 
-    directory_button.clicked.connect(select_directory)
-    files_button.clicked.connect(select_files)
+    # Create the selection window
+    root = tk.Tk()
+    root.title("Select Directory or Files")
+    root.resizable(False, False)
+    center_window(root)
 
-    layout.addWidget(directory_button)
-    layout.addWidget(files_button)
+    # Instruction label
+    label = tk.Label(root, text="Select the input source:")
+    label.pack(pady=10)
 
-    window = QWidget()
-    window.setLayout(layout)
+    # Buttons
+    directory_button = tk.Button(
+        root,
+        text="Select Directory",
+        width=20,
+        command=select_directory
+    )
+    directory_button.pack(pady=4)
 
-    # Set the window size and position it in the center of the screen
-    window_width = 300
-    window_height = 100
-    screen_geometry = QDesktopWidget().screenGeometry()
-    x_position = (screen_geometry.width() - window_width) // 2
-    y_position = (screen_geometry.height() - window_height) // 2
+    files_button = tk.Button(
+        root,
+        text="Select Files",
+        width=20,
+        command=select_files
+    )
+    files_button.pack(pady=4)
 
-    window.setGeometry(x_position, y_position, window_width, window_height)
+    root.protocol("WM_DELETE_WINDOW", cancel_selection)
 
-    # Set the window title
-    window.setWindowTitle("Select Directory or Files")
-    window.show()
-
-    app.exec_()
-
-    if directory_path and not selected_files:
-        # If a directory was selected but no files were chosen, get the list of .hdf5 files in that directory
-        selected_files = [os.path.basename(file) for file in os.listdir(directory_path) if file.endswith('.hdf5')]
+    root.mainloop()
 
     return directory_path, selected_files
 
@@ -273,8 +312,13 @@ def ask_user_for_t_range():
     root = tk.Tk()
     root.withdraw()
 
-    # Ask the user if they want to define the range
-    user_response = messagebox.askyesno("Define Range", "Do you want to define the range of 't'?")
+    user_response = messagebox.askyesno(
+        "Define Range",
+        "Do you want to define the range of 't'?",
+        parent=root
+    )
+
+    root.destroy()
 
     return user_response
 
@@ -305,7 +349,7 @@ def generate_base_name(selected_synchrotron, hdf5_file):
     elif selected_synchrotron == 'APS':
         base_name = hdf5_file.replace('.hdf5', '')
     elif selected_synchrotron == 'ESRF':
-        base_name = hdf5_file.replace('.hdf5', '')
+        base_name = os.path.splitext(hdf5_file)[0]
 
     return base_name
 
@@ -704,6 +748,70 @@ def process_aps_data(file_path):
 # Function to process data from ESRF
 def process_esrf_data(file_path):
     """
+    Process data from an HDF5 or H5 file of 'ESRF' and generate DataFrames.
+
+    Args:
+        file_path (str): The path to the HDF5 file.
+        
+    Returns:
+        tuple: A tuple containing:
+            - pd.DataFrame: A DataFrame with columns '# t' and 'g2(q=X)' for each 'q' value.
+            - dict: A dictionary containing DataFrames with rows 't1' and columns 't2' for each 'q' value. NO!
+    """
+    try:
+        with h5py.File(file_path, 'r') as hdf:
+            ### q values ###
+            # Navigate to the correlations group
+            esrf_full = hdf['entry_0000/correlations/full']
+
+            # Get the 'q' values array
+            q_values = esrf_full['parameters/q'][:]  # shape: (nq,)
+
+            ### t data ###
+            # Get the time axis for g2
+            t_data = esrf_full['g2/lag'][:]          # shape: (ntau,)
+
+            # Initialize an empty DataFrame with '# t' as the first column
+            combined_df = pd.DataFrame({'# t': t_data})
+
+            ### g2 data ###
+            # Get the g2 matrix (nq x ntau)
+            cf = esrf_full['g2/cf'][:]               # shape: (nq, ntau)
+
+            # Add 'g2' data for each 'q' to the DataFrame
+            for i in range(len(q_values)):
+                q_value = q_values[i]
+                g2_data = cf[i, :]
+                combined_df[f'g2(q={q_value})'] = g2_data
+
+            ### Two-time correlation ###
+            # Initialize dictionary to store t1 vs t2 DataFrames for each q
+            #t1t2_dataframes = {}
+            # Navigate to the two-time group (if present)
+            #if 'twotime' in esrf_full:
+            #    twotime_group = esrf_full['twotime']
+
+                # Read the two-time cube and its time axes
+                #ttcf = twotime_group['ttcf'][:]      # shape: (nq, ntau, ntau)
+                #t1   = twotime_group['lag'][:]       # shape: (ntau,)
+                #t2   = twotime_group['age'][:]       # shape: (ntau,)
+
+                # Create one DataFrame per q (rows=t1, cols=t2)
+                #for i in range(len(q_values)):
+                    #t1t2_df = pd.DataFrame(ttcf[i, :, :], index=t1, columns=t2)
+                    #t1t2_dataframes[float(q_values[i])] = t1t2_df
+
+        return combined_df
+    
+    # Handle exceptions that may occur during data processing
+    except (OSError, KeyError) as e:
+        error_message = f"### Error ###:\nThe file does not belong to 'ESRF' or there is an issue with the data.\n{e}"
+        print(error_message)
+        return None, None
+
+# Function to process data from ESRF old
+def process_esrf_data_old(file_path):
+    """
     Process data from an HDF5 file of 'ESRF' and generate a DataFrame with columns 't' and 'g2(q=X)'.
 
     Args:
@@ -744,6 +852,23 @@ def process_esrf_data(file_path):
         print(error_message)
         return None
 
+# Function to clean the arrays
+def clean_series(t, g2, min_points=8, return_pandas=True):
+    t_arr  = np.asarray(t, dtype=float)
+    g2_arr = np.asarray(g2, dtype=float)
+    mask = np.isfinite(t_arr) & np.isfinite(g2_arr)
+    t_arr, g2_arr = t_arr[mask], g2_arr[mask]
+
+    if t_arr.size > 0 and t_arr[0] == 0.0:
+        t_arr, g2_arr = t_arr[1:], g2_arr[1:]
+
+    if t_arr.size < min_points:
+        return None, None
+
+    if return_pandas:
+        return pd.Series(t_arr), pd.Series(g2_arr)
+    return t_arr, g2_arr
+
 # Function to get de t range
 def get_t_range_slider(t_values):
     """
@@ -755,98 +880,416 @@ def get_t_range_slider(t_values):
     Returns:
         tuple: Lower and upper limits of the selected range.
     """
-    def apply_range():
-        nonlocal lower_limit, upper_limit
-        lower_limit = int(lower_slider.get())
-        upper_limit = int(upper_slider.get())
+    t_values = list(t_values)
 
-        if lower_limit > upper_limit:
-            messagebox.showerror("Error", "Lower limit must be less than or equal to the upper limit.")
-        else:
-            range_dialog.destroy()
-
-    def on_arrow_key_press(event):
-        """
-        Move the slider position by one when arrow keys are pressed.
-        """
-        if event.keysym == 'Left':
-            lower_slider.set(lower_slider.get() - 1)
-        elif event.keysym == 'Right':
-            lower_slider.set(lower_slider.get() + 1)
-        elif event.keysym == 'Up':
-            upper_slider.set(upper_slider.get() + 1)
-        elif event.keysym == 'Down':
-            upper_slider.set(upper_slider.get() - 1)
-
-    range_dialog = tk.Toplevel()
-    range_dialog.title("Select 't' Range")
-
-    # Center the window on the screen
-    window_width = 400
-    window_height = 180
-    screen_width = range_dialog.winfo_screenwidth()
-    screen_height = range_dialog.winfo_screenheight()
-    x_position = (screen_width - window_width) // 2
-    y_position = (screen_height - window_height) // 2
-
-    range_dialog.geometry(f"{window_width}x{window_height}+{x_position}+{y_position}")
+    if len(t_values) == 0:
+        return 0, 0
 
     lower_limit = 0
     upper_limit = len(t_values) - 1
 
-    # Create sliders for lower and upper limits with 't' values as labels
-    lower_slider = tk.Scale(range_dialog, from_=0, to=len(t_values) - 1, orient=tk.HORIZONTAL, label="◄ Lower Limit ►",
-                            length=300, showvalue=0, command=lambda x: lower_slider_label.config(text=f"{t_values[int(x)]:.4f}"))
+    def center_window(window, width=400, height=190):
+        """Center a Tkinter window on the screen."""
+        screen_width = window.winfo_screenwidth()
+        screen_height = window.winfo_screenheight()
+        x_position = (screen_width - width) // 2
+        y_position = (screen_height - height) // 2
+        window.geometry(f"{width}x{height}+{x_position}+{y_position}")
+
+    def update_lower_label(value):
+        """Update the lower-limit label."""
+        index = int(float(value))
+        lower_slider_label.config(text=f"{t_values[index]:.4f}")
+
+    def update_upper_label(value):
+        """Update the upper-limit label."""
+        index = int(float(value))
+        upper_slider_label.config(text=f"{t_values[index]:.4f}")
+
+    def apply_range():
+        """Apply the selected range and close the window."""
+        nonlocal lower_limit, upper_limit
+
+        lower_limit = int(lower_slider.get())
+        upper_limit = int(upper_slider.get())
+
+        if lower_limit > upper_limit:
+            messagebox.showerror(
+                "Invalid range",
+                "Lower limit must be less than or equal to the upper limit.",
+                parent=root
+            )
+            return
+
+        root.destroy()
+
+    def cancel_range():
+        """
+        Close the window without changing the default range.
+        The full range is used.
+        """
+        nonlocal lower_limit, upper_limit
+        lower_limit = 0
+        upper_limit = len(t_values) - 1
+        root.destroy()
+
+    def on_arrow_key_press(event):
+        """Move the sliders using arrow keys."""
+        if event.keysym == "Left":
+            lower_slider.set(max(0, lower_slider.get() - 1))
+        elif event.keysym == "Right":
+            lower_slider.set(min(len(t_values) - 1, lower_slider.get() + 1))
+        elif event.keysym == "Up":
+            upper_slider.set(min(len(t_values) - 1, upper_slider.get() + 1))
+        elif event.keysym == "Down":
+            upper_slider.set(max(0, upper_slider.get() - 1))
+
+    # Use Tk(), not Toplevel(), to avoid creating an empty ghost window.
+    root = tk.Tk()
+    root.title("Select 't' Range")
+    root.resizable(False, False)
+    center_window(root)
+
+    lower_slider = tk.Scale(
+        root,
+        from_=0,
+        to=len(t_values) - 1,
+        orient=tk.HORIZONTAL,
+        label="◄ Lower Limit ►",
+        length=300,
+        showvalue=0,
+        command=update_lower_label
+    )
     lower_slider.set(lower_limit)
     lower_slider.pack()
 
-    lower_slider_label = tk.Label(range_dialog, text=f"{t_values[lower_limit]:.4f}", width=10)
+    lower_slider_label = tk.Label(root, text=f"{t_values[lower_limit]:.4f}", width=12)
     lower_slider_label.pack()
 
-    upper_slider = tk.Scale(range_dialog, from_=0, to=len(t_values) - 1, orient=tk.HORIZONTAL, label="▲ Upper Limit ▼",
-                            length=300, showvalue=0, command=lambda x: upper_slider_label.config(text=f"{t_values[int(x)]:.4f}"))
+    upper_slider = tk.Scale(
+        root,
+        from_=0,
+        to=len(t_values) - 1,
+        orient=tk.HORIZONTAL,
+        label="▲ Upper Limit ▼",
+        length=300,
+        showvalue=0,
+        command=update_upper_label
+    )
     upper_slider.set(upper_limit)
     upper_slider.pack()
 
-    upper_slider_label = tk.Label(range_dialog, text=f"{t_values[upper_limit]:.4f}", width=10)
+    upper_slider_label = tk.Label(root, text=f"{t_values[upper_limit]:.4f}", width=12)
     upper_slider_label.pack()
 
-    # Create a button to apply the selected range
-    apply_button = tk.Button(range_dialog, text="Apply Range", command=apply_range)
-    apply_button.pack()
+    apply_button = tk.Button(root, text="Apply Range", command=apply_range)
+    apply_button.pack(pady=8)
 
-    # Bind arrow key events to move the sliders
-    range_dialog.bind('<Left>', on_arrow_key_press)
-    range_dialog.bind('<Right>', on_arrow_key_press)
-    range_dialog.bind('<Up>', on_arrow_key_press)
-    range_dialog.bind('<Down>', on_arrow_key_press)
+    root.bind("<Left>", on_arrow_key_press)
+    root.bind("<Right>", on_arrow_key_press)
+    root.bind("<Up>", on_arrow_key_press)
+    root.bind("<Down>", on_arrow_key_press)
 
-    # Wait for the window to be closed
-    range_dialog.wait_window()
+    root.protocol("WM_DELETE_WINDOW", cancel_range)
+
+    # Bring the window to the front.
+    root.lift()
+    root.attributes("-topmost", True)
+    root.after(200, lambda: root.attributes("-topmost", False))
+
+    root.mainloop()
+
+    return lower_limit, upper_limit
+
+# Function to get the t range with graphical preview
+def get_t_range_slider_preview(dataset_df, preview_q_column=None):
+    """
+    Display a GUI window to select a t range with a live graphical preview.
+
+    This function is intended for single-file processing only. The preview
+    shows one g2(q,t) curve and shades the selected t range.
+
+    No fitting is performed during slider movement, so the interface remains
+    responsive.
+
+    Args:
+        dataset_df (pandas.DataFrame): DataFrame containing '# t' and g2(q=...) columns.
+        preview_q_column (str, optional): Column used for the preview. If None,
+                                          the first g2 column is used.
+
+    Returns:
+        tuple: Lower and upper index limits of the selected range.
+    """
+    if '# t' not in dataset_df.columns:
+        raise ValueError("The DataFrame must contain a '# t' column.")
+
+    q_columns = [col for col in dataset_df.columns if col != '# t']
+
+    if len(q_columns) == 0:
+        raise ValueError("The DataFrame must contain at least one g2(q=...) column.")
+
+    if preview_q_column is None or preview_q_column not in q_columns:
+        preview_q_column = q_columns[0]
+
+    t_values = dataset_df['# t'].to_numpy(dtype=float)
+
+    if len(t_values) == 0:
+        return 0, 0
+
+    lower_limit = 0
+    upper_limit = len(t_values) - 1
+
+    def center_window(window, width=780, height=720):
+        """Center a Tkinter window on the screen."""
+        screen_width = window.winfo_screenwidth()
+        screen_height = window.winfo_screenheight()
+        x_position = (screen_width - width) // 2
+        y_position = (screen_height - height) // 2
+        window.geometry(f"{width}x{height}+{x_position}+{y_position}")
+
+    def get_safe_span_limits(lo_index, hi_index):
+        """
+        Return x limits compatible with a logarithmic x-axis.
+
+        If t=0 is included, the smallest positive t is used only for display.
+        The returned indices are not modified.
+        """
+        positive_t = t_values[t_values > 0]
+
+        if positive_t.size == 0:
+            return t_values[lo_index], t_values[hi_index]
+
+        min_positive_t = positive_t.min()
+
+        x_left = t_values[lo_index]
+        x_right = t_values[hi_index]
+
+        if x_left <= 0:
+            x_left = min_positive_t
+
+        if x_right <= 0:
+            x_right = min_positive_t
+
+        return x_left, x_right
+
+    def draw_preview():
+        """Draw or redraw the preview plot."""
+        q_col = q_column_var.get()
+        g2_values = dataset_df[q_col].to_numpy(dtype=float)
+
+        ax.clear()
+
+        valid_mask = (
+            np.isfinite(t_values)
+            & np.isfinite(g2_values)
+            & (t_values > 0)
+        )
+
+        ax.semilogx(
+            t_values[valid_mask],
+            g2_values[valid_mask],
+            'o-',
+            markersize=3,
+            linewidth=1
+        )
+
+        lo = int(lower_slider.get())
+        hi = int(upper_slider.get())
+
+        if lo <= hi:
+            x_left, x_right = get_safe_span_limits(lo, hi)
+            ax.axvspan(x_left, x_right, alpha=0.25)
+
+        ax.set_xlabel("Delay time (s)")
+        ax.set_ylabel(r"$g_2(q,t)$")
+        ax.set_title(f"Range preview: {q_col}")
+        ax.grid(True, alpha=0.3)
+
+        figure.tight_layout()
+        canvas.draw_idle()
+
+    def update_range_labels(*args):
+        """Update labels and selected region when sliders move."""
+        lo = int(lower_slider.get())
+        hi = int(upper_slider.get())
+
+        lower_slider_label.config(text=f"{t_values[lo]:.5g}")
+        upper_slider_label.config(text=f"{t_values[hi]:.5g}")
+
+        if lo > hi:
+            range_label.config(
+                text="Invalid range: lower limit is larger than upper limit."
+            )
+        else:
+            range_label.config(
+                text=f"Selected range: {t_values[lo]:.5g} s to {t_values[hi]:.5g} s"
+            )
+
+        draw_preview()
+
+    def apply_range():
+        """Apply the selected range and close the window."""
+        nonlocal lower_limit, upper_limit
+
+        lower_limit = int(lower_slider.get())
+        upper_limit = int(upper_slider.get())
+
+        if lower_limit > upper_limit:
+            messagebox.showerror(
+                "Invalid range",
+                "Lower limit must be less than or equal to the upper limit.",
+                parent=root
+            )
+            return
+
+        root.destroy()
+
+    def use_full_range():
+        """Close the window and use the full range."""
+        nonlocal lower_limit, upper_limit
+
+        lower_limit = 0
+        upper_limit = len(t_values) - 1
+
+        root.destroy()
+
+    root = tk.Tk()
+    root.title("Select 't' Range")
+    root.resizable(True, True)
+    center_window(root)
+
+    # Main plot
+    figure = Figure(figsize=(7.2, 3.6))
+    ax = figure.add_subplot(111)
+
+    canvas = FigureCanvasTkAgg(figure, master=root)
+    canvas.get_tk_widget().pack(
+        side='top',
+        fill='both',
+        expand=True,
+        padx=10,
+        pady=10
+    )
+
+    # q-column selector
+    selector_frame = ttk.Frame(root)
+    selector_frame.pack(fill='x', padx=10, pady=4)
+
+    ttk.Label(selector_frame, text="Preview q:").pack(side='left', padx=(0, 6))
+
+    q_column_var = tk.StringVar(value=preview_q_column)
+
+    q_selector = ttk.Combobox(
+        selector_frame,
+        textvariable=q_column_var,
+        values=q_columns,
+        state="readonly",
+        width=45
+    )
+    q_selector.pack(side='left', fill='x', expand=True)
+    q_selector.bind("<<ComboboxSelected>>", lambda event: draw_preview())
+
+    # Lower-limit slider
+    lower_slider = tk.Scale(
+        root,
+        from_=0,
+        to=len(t_values) - 1,
+        orient=tk.HORIZONTAL,
+        label="Lower limit",
+        length=620,
+        showvalue=0,
+        command=update_range_labels
+    )
+    lower_slider.pack(fill='x', padx=20)
+
+    lower_slider_label = tk.Label(
+        root,
+        text=f"{t_values[lower_limit]:.5g}",
+        width=14
+    )
+    lower_slider_label.pack()
+
+    # Upper-limit slider
+    upper_slider = tk.Scale(
+        root,
+        from_=0,
+        to=len(t_values) - 1,
+        orient=tk.HORIZONTAL,
+        label="Upper limit",
+        length=620,
+        showvalue=0,
+        command=update_range_labels
+    )
+    upper_slider.pack(fill='x', padx=20)
+
+    upper_slider_label = tk.Label(
+        root,
+        text=f"{t_values[upper_limit]:.5g}",
+        width=14
+    )
+    upper_slider_label.pack()
+
+    range_label = tk.Label(root, text="")
+    range_label.pack(pady=4)
+
+    # Buttons
+    button_frame = ttk.Frame(root)
+    button_frame.pack(fill='x', padx=20, pady=10)
+
+    full_range_button = ttk.Button(
+        button_frame,
+        text="Use Full Range",
+        command=use_full_range
+    )
+    full_range_button.pack(side='left')
+
+    apply_button = ttk.Button(
+        button_frame,
+        text="Apply Range",
+        command=apply_range
+    )
+    apply_button.pack(side='right')
+
+    root.protocol("WM_DELETE_WINDOW", use_full_range)
+
+    # Initialize slider values after all labels/widgets exist.
+    lower_slider.set(lower_limit)
+    upper_slider.set(upper_limit)
+    update_range_labels()
+
+    root.lift()
+    root.attributes("-topmost", True)
+    root.after(200, lambda: root.attributes("-topmost", False))
+
+    root.mainloop()
 
     return lower_limit, upper_limit
 
 # Function to obtain 't' range limits
-def get_t_range_limits(dataset_df, define_t_range):
+def get_t_range_limits(dataset_df, define_t_range, show_preview=False):
     """
     Get the lower and upper limits for 't'.
 
     Args:
         dataset_df (DataFrame): The dataset DataFrame.
         define_t_range (bool): Flag indicating if 't' range is defined.
+        show_preview (bool): If True, show a graphical preview of the selected range.
+                             This should be used only for single-file processing.
 
     Returns:
         tuple: Lower and upper limits for 't'.
     """
-    # Extract 't' values from the specified DataFrame column
-    t_values = dataset_df['# t'].tolist()
+    if '# t' not in dataset_df.columns:
+        raise ValueError("The DataFrame must contain a '# t' column.")
 
-    if define_t_range:
-        # Get the range using a slider
-        return get_t_range_slider(t_values)
-    else:
-        # Use the full range of 't' values
-        return 0, len(t_values) - 1
+    if not define_t_range:
+        return 0, len(dataset_df['# t']) - 1
+
+    if show_preview:
+        return get_t_range_slider_preview(dataset_df)
+
+    t_values = dataset_df['# t'].tolist()
+    return get_t_range_slider(t_values)
 
 # Function to prompt the user for defining the q values
 def ask_user_for_select_q():
@@ -859,8 +1302,13 @@ def ask_user_for_select_q():
     root = tk.Tk()
     root.withdraw()
 
-    # Ask the user if they want to define the range
-    user_response = messagebox.askyesno("Select q Values", "Do you want to select q values?")
+    user_response = messagebox.askyesno(
+        "Select q Values",
+        "Do you want to select q values?",
+        parent=root
+    )
+
+    root.destroy()
 
     return user_response
 
@@ -921,10 +1369,11 @@ def save_t1t2_data(t1t2_dfs, directory, base_name):
 # Function to initialize error and success counters
 def initialize_error_and_success_counters():
     """
-    Initializes counters and lists for error and success tracking.
+    Initializes counters and lists for error, success, and fit-quality tracking.
     
     Returns:
-        dict: A dictionary containing counters and lists for error and success tracking.
+        dict: A dictionary containing counters and lists for error, success,
+              and low-quality fits.
     """
     counters = {
         'hdf5_files': 0,
@@ -932,8 +1381,10 @@ def initialize_error_and_success_counters():
         'invalid_data': 0,
         'success': 0,
         'failure': 0,
+        'below_threshold': 0,
         'invalid_files': [],
-        'failed_files': []
+        'failed_files': [],
+        'below_threshold_files': []
     }
     
     return counters
@@ -1222,137 +1673,191 @@ class GraphWindow:
         y = (self.root.winfo_screenheight() - height) // 2
         self.root.geometry("+%d+%d" % (x, y))
 
+    # Method to create the interactive graph
     def create_graph(self):
         """Create the interactive graph."""
         self.figure = Figure(figsize=(8, 5))
         self.ax = self.figure.add_subplot(111)
+
         self.canvas = FigureCanvasTkAgg(self.figure, master=self.root)
         self.canvas.get_tk_widget().pack(side='top', fill='both', expand=1)
-        
-        # Iterate over the columns and adjust the code
+
         for i, q_column in enumerate(self.new_dataset_df.columns[1:], 1):
-            
-            # Extract the q value from the column name
+
             match = re.search(r"q=(\d+\.\d+)", q_column)
-            if match:
-                q_value = float(match.group(1))
-            
-            # Get the 't' and 'g2' data for the current q value
+
+            if not match:
+                continue
+
+            q_value = float(match.group(1))
+
             t_q = self.new_dataset_df['# t']
             g2_q = self.new_dataset_df[q_column]
 
-            # Slice the values of 't' and 'g2' using the provided indices
             t_q = t_q.iloc[self.lower_limit:self.upper_limit + 1]
             g2_q = g2_q.iloc[self.lower_limit:self.upper_limit + 1]
 
-            # Fit the Single Exponential Model
             fit_params_selq, fitted_curve_selq, r2_selq = fit_single_exponential(t_q, g2_q)
-                
+
             A_selq = fit_params_selq[0]
             B_selq = fit_params_selq[1]
 
-            ### Plot the experimental data and the fitted curves ###
+            color = self.cmap(i - 1)
 
-            color = self.cmap(i-1)  # Get color based on index
-                
-            # Plot experimental data points
-            line_exp_sq = self.ax.semilogx(t_q, (g2_q - A_selq)/B_selq, 'o', color=color)[0]
+            line_exp_sq = self.ax.semilogx(
+                t_q,
+                (g2_q - A_selq) / B_selq,
+                'o',
+                color=color
+            )[0]
 
-            # Plot fitted curve
-            line_fit_sq = self.ax.semilogx(t_q, (fitted_curve_selq - A_selq)/B_selq, color=color, linestyle='-')[0]
+            line_fit_sq = self.ax.semilogx(
+                t_q,
+                (fitted_curve_selq - A_selq) / B_selq,
+                color=color,
+                linestyle='-'
+            )[0]
 
-            # Add labels to the legend lists based on the model type
             self.lines_labels_dict["exp_lines_selq"].append(line_exp_sq)
             self.lines_labels_dict["exp_labels_selq"].append(f"q = {q_value:.6f}")
             self.lines_labels_dict["fit_lines_selq"].append(line_fit_sq)
             self.lines_labels_dict["fit_labels_selq"].append(f"R2: {r2_selq:.3f}")
-                
-        ### Configure the plot ###
-        
-        # Configure legend and title
+
         self.ax.set_title('Correlation function fitting - Single Exponential Model')
         self.ax.set_xlabel('Delay Time (s)')
         self.ax.set_ylabel(r'$(g_2 - \mathrm{baseline}) / \beta$')
-        
-        # Add labels to the plot
-        # Combine q and R values
-        combined_labels = [f"{exp_label} - {fit_label}" for exp_label, fit_label in
-                           zip(self.lines_labels_dict["exp_labels_selq"], self.lines_labels_dict["fit_labels_selq"])]
-        
-        # Create the legend for experimental data
-        legend_exp = self.ax.legend(self.lines_labels_dict["exp_lines_selq"], combined_labels,
-                                    loc='upper right', bbox_to_anchor=(1, 1), borderaxespad=0)
-        self.ax.add_artist(legend_exp)
+
+        # Do not add a legend inside the plot.
+        # The q and R2 labels are shown in the checkbox list below the graph.
+        self.figure.tight_layout()
 
         self.canvas.draw()
 
+    # Method to create the q value selector checkboxes
     def create_q_selector(self):
         """Create the q value selector checkboxes."""
-        # Create a frame to contain the q value selector checkboxes
+        from matplotlib.colors import to_hex
+
+        self.selected_values = []
+        self.selected_columns = []
+        self.q_buttons = []
+
         q_frame = ttk.Frame(self.root)
         q_frame.pack(side='top', fill='both', expand=True)
 
-        # Create a canvas to allow scrolling for q value selector checkboxes
         q_canvas = tk.Canvas(q_frame)
         q_canvas.pack(side='left', fill='both', expand=True)
 
-        # Create a scrollbar for the canvas
         q_scrollbar = ttk.Scrollbar(q_frame, orient="vertical", command=q_canvas.yview)
         q_scrollbar.pack(side='right', fill='y')
 
-        # Create a frame to contain the q value selector checkboxes inside the canvas
         inner_frame = ttk.Frame(q_canvas)
         q_canvas.create_window((0, 0), window=inner_frame, anchor='nw')
 
-        # Create q value selector checkboxes
-        for i, q_column in enumerate(self.new_dataset_df.columns[1:], 1):
-            match = re.search(r"q=(\d+\.\d+)", q_column)
-            if match:
-                q_value = float(match.group(1))
-                btn_var = tk.BooleanVar(value=True)
-                btn = ttk.Checkbutton(inner_frame, text=f'q = {q_value:.6f}', variable=btn_var,
-                                    command=lambda q=q_value, var=btn_var: self.toggle_curve(q, var))
-                btn.invoke()
-                btn.pack(side='top', padx=5, pady=2)
-                self.q_buttons.append((btn, btn_var))
+        for q_index, (q_column, exp_label, fit_label, exp_line) in enumerate(
+            zip(
+                self.new_dataset_df.columns[1:],
+                self.lines_labels_dict["exp_labels_selq"],
+                self.lines_labels_dict["fit_labels_selq"],
+                self.lines_labels_dict["exp_lines_selq"]
+            )
+        ):
 
-        # Update the size of the inner_frame to match its contents
+            match = re.search(r"q=(\d+\.\d+)", q_column)
+
+            if not match:
+                continue
+
+            q_value = float(match.group(1))
+
+            # All q values start selected because all curves start visible.
+            self.selected_values.append(q_value)
+            self.selected_columns.append(q_column)
+
+            btn_var = tk.BooleanVar(value=True)
+
+            # Use the same color as the corresponding curve.
+            curve_color = to_hex(exp_line.get_color())
+
+            row_frame = ttk.Frame(inner_frame)
+            row_frame.pack(side='top', anchor='w', fill='x', padx=5, pady=2)
+
+            btn = tk.Checkbutton(
+                row_frame,
+                variable=btn_var,
+                command=lambda idx=q_index, var=btn_var: self.toggle_curve(idx, var),
+                selectcolor=curve_color,
+                anchor='w'
+                # foreground=curve_color,          # Optional: use colored text instead of black text.
+                # activeforeground=curve_color     # Optional: use colored active text instead of black text.
+            )
+            btn.pack(side='left')
+
+            color_dot = tk.Label(
+                row_frame,
+                text="●",
+                foreground=curve_color
+            )
+            color_dot.pack(side='left', padx=(2, 5))
+
+            q_label = tk.Label(
+                row_frame,
+                text=f"{exp_label} - {fit_label}",
+                foreground="black",
+                anchor='w',
+                justify='left'
+            )
+            q_label.pack(side='left')
+
+            # Allow clicking on the dot or label to toggle the checkbox.
+            color_dot.bind("<Button-1>", lambda event, button=btn: button.invoke())
+            q_label.bind("<Button-1>", lambda event, button=btn: button.invoke())
+
+            self.q_buttons.append((btn, btn_var))
+
         inner_frame.update_idletasks()
+
         q_canvas.config(scrollregion=q_canvas.bbox("all"))
         q_canvas.config(yscrollcommand=q_scrollbar.set)
-        q_canvas.bind('<Configure>', lambda event, q_canvas=q_canvas: q_canvas.configure(scrollregion=q_canvas.bbox("all")))
 
-        # Create a frame to contain the Select and Exit buttons
-        button_frame = ttk.Frame(self.root)
-        button_frame.pack(side='bottom', fill='x')
+        q_canvas.bind(
+            '<Configure>',
+            lambda event, q_canvas=q_canvas: q_canvas.configure(
+                scrollregion=q_canvas.bbox("all")
+            )
+        )
 
-    def toggle_curve(self, q_value, var):
-        """Toggle visibility of the curve for the specified q value."""
-        # Find the index of q in the q list
-        q_index = self.lines_labels_dict["exp_labels_selq"].index(f"q = {q_value:.6f}")
+    # Method to toggle q curve visibility
+    def toggle_curve(self, q_index, var):
+        """Toggle visibility of the curve for the specified q index."""
+        is_visible = var.get()
 
-        # Toggle visibility of the experimental curve and the fitted curve
+        # Get the experimental and fitted curves associated with this q value.
         exp_line = self.lines_labels_dict["exp_lines_selq"][q_index]
         fit_line = self.lines_labels_dict["fit_lines_selq"][q_index]
 
-        exp_line.set_visible(not exp_line.get_visible())
-        fit_line.set_visible(not fit_line.get_visible())
+        # Checkbox selected = curve visible.
+        # Checkbox unselected = curve hidden.
+        exp_line.set_visible(is_visible)
+        fit_line.set_visible(is_visible)
 
-        # Update the selected values list based on the visibility
-        self.selected_values = [
-            float(re.search(r"q=(\d+\.\d+)", column).group(1))
-            for column, line in zip(self.new_dataset_df.columns[1:], self.lines_labels_dict["exp_lines_selq"])
-            if line.get_visible()
-        ]
+        # Rebuild the selected q values and selected DataFrame columns.
+        self.selected_values = []
+        self.selected_columns = []
 
-        # Update the selected values list based on the visibility
-        self.selected_columns = [
-            q for q, line in zip(self.new_dataset_df.columns[1:], self.lines_labels_dict["exp_lines_selq"])
-            if line.get_visible()
-        ]
+        for column, line in zip(
+            self.new_dataset_df.columns[1:],
+            self.lines_labels_dict["exp_lines_selq"]
+        ):
+            if line.get_visible():
+                match = re.search(r"q=(\d+\.\d+)", column)
 
-        # Redraw the canvas to reflect the changes
-        self.canvas.draw()
+                if match:
+                    self.selected_values.append(float(match.group(1)))
+                    self.selected_columns.append(column)
+
+        # Redraw the canvas to reflect the changes.
+        self.canvas.draw_idle()
 
     def create_buttons(self):
         """Create the Select and Exit buttons."""
@@ -1378,8 +1883,13 @@ class GraphWindow:
         return filtered_dataset_df
 
     def exit_window(self):
-        """Close the window without saving changes."""
-        self.root.destroy()
+        """
+        Close the q-selection window without applying additional filtering.
+
+        The original DataFrame is kept unchanged. The Tkinter window is not
+        destroyed here because the notebook destroys it after mainloop().
+        """
+        self.root.quit()
 
 #-----------------------------------------------------------------------#
 #----------------------------- Fit Models ------------------------------#
@@ -1990,7 +2500,7 @@ def write_dat_file(output_path, q_value, t, g2, A_single, B_single, C_single, A_
         dat_file.write("#delay time (s)\tg2\tstd\tFitted g2 Single\tFitted g2 Stretched\tFitted g2 Cumulants\n")
 
         fitted_curve_single = A_single + B_single * np.exp(-2 * C_single * t)
-        fitted_curve_stretched = A_stretched + B_stretched * np.exp(-2 * C_stretched * t) ** gamma
+        fitted_curve_stretched = A_stretched + B_stretched * np.exp(-2 * (C_stretched * t) ** gamma)
         fitted_curve_cumulants = A_cumulants + B_cumulants * np.exp(-2 * C1_cumulants * t) * (1 + (1 / 2) * C2_cumulants * t**2)**2
 
         for i in range(len(t)):
@@ -1998,12 +2508,15 @@ def write_dat_file(output_path, q_value, t, g2, A_single, B_single, C_single, A_
             dat_file.write(row_str)
 
 # Function to print error and success counters
-def print_summary(counters):
+def print_summary(counters, directory=None, r2_threshold=None):
     """
     Print a summary of processing results.
 
     Parameters:
-        counters (dict): A dictionary containing counters and lists for error and success tracking.
+        counters (dict): A dictionary containing counters and lists for error,
+                         success, and fit-quality tracking.
+        directory (str, optional): Directory where the low-R2 report will be saved.
+        r2_threshold (float, optional): R2 threshold used during analysis.
     """
     print(f"Total HDF5 files: {counters['hdf5_files']}")
     print(f"Total q values: {counters['q_values']}")
@@ -2014,17 +2527,43 @@ def print_summary(counters):
         print("Invalid files:")
         for file_name in counters['invalid_files']:
             print(file_name)
-    
+
     counters['success'] = counters['q_values'] - counters['failure']
 
     print(f"Successful fits: {counters['success']}")
     print(f"Failed fits: {counters['failure']}")
+    print(f"Fits below R2 threshold: {counters['below_threshold']}")
 
     # Print the base_names of failed files
     if counters['failure'] != 0:
         print("Failed fits files:")
         for file_name in counters['failed_files']:
             print(file_name)
+
+    # Save low-quality fits to a separate report file instead of printing them all.
+    if counters['below_threshold'] != 0:
+        if directory is not None:
+            below_threshold_path = os.path.join(
+                directory,
+                "below_R2_threshold_fits.dat"
+            )
+
+            with open(below_threshold_path, "w") as report_file:
+                report_file.write("# Fits below R2 threshold\n")
+
+                if r2_threshold is not None:
+                    report_file.write(f"# R2_threshold = {r2_threshold}\n")
+
+                report_file.write("# These fits converged numerically but were excluded from averages and diffusion-related plots.\n")
+                report_file.write("# Format: filename - q - model - R2\n")
+
+                for file_name in counters['below_threshold_files']:
+                    report_file.write(f"{file_name}\n")
+
+            print(f"Detailed low-R2 fit list saved to: {below_threshold_path}")
+
+        else:
+            print("Detailed low-R2 fit list was not saved because no output directory was provided.")
 
 # Function to generate fit results tables
 def generate_fit_results_tables(directory, table_data_single, table_data_stretched, table_data_cumulants):
@@ -2115,83 +2654,178 @@ def plot_data_and_curves(ax, t, g2, baseline, Beta, fitted_curve, q_value, r2_va
     lines_labels_dict[f"fit_lines_{model_type.lower()}"].append(line_fit)
     lines_labels_dict[f"fit_labels_{model_type.lower()}"].append(f"R2: {r2_value:.3f}")
 
-# Define the function to fit and plot a specified model
+# Function to fit and plot a specified model
 def fit_and_plot_model(q_values, relax_rate_values, ax, colors, label, model_type='linear'):
     """
-    Fit a model to given data and generate a plot on a specified subplot
+    Fit a model to given data and generate a plot on a specified subplot.
+
+    Invalid, NaN, infinite, or non-positive relaxation-rate values are ignored.
+    If there are not enough valid points, the function writes a message in the
+    subplot and returns NaN values instead of raising an error.
 
     Args:
         q_values (array-like): Array of q values.
         relax_rate_values (array-like): Array of corresponding relaxation rates.
         ax (matplotlib.axes.Axes): The subplot where the plot will be generated.
         colors (list): List of colors for each data point.
-        label (str): Label for the plot
-        model_type (str, optional): Type of model to fit. Supported values are 'linear' or 'exponential'. Defaults to 'linear'.
+        label (str): Label for the plot.
+        model_type (str, optional): Type of model to fit. Supported values are
+                                    'linear' or 'exponential'. Defaults to 'linear'.
 
     Returns:
         D (float): Diffusion coefficient obtained from the fit.
-        n (float): Exponent obtained from the fit (applicable for exponential model).
-        r_metric (float): Metric (e.g., Pearson correlation coefficient or R-squared) indicating the quality of the fit.
-        std_err (float): Standard error of the slope for linear fits. Tuple (std_err_D, std_err_n) for exponential fits.
+        n (float): Exponent obtained from the fit.
+        r_metric (float): Pearson r for linear fit or R2 for exponential fit.
+        std_err (float or tuple): Standard error for the fit.
     """
     try:
+        q_values = np.asarray(q_values, dtype=float)
+        relax_rate_values = np.asarray(relax_rate_values, dtype=float)
+        colors = list(colors)
+
+        # Keep only physically meaningful and finite values.
+        valid_mask = (
+            np.isfinite(q_values)
+            & np.isfinite(relax_rate_values)
+            & (q_values > 0)
+            & (relax_rate_values > 0)
+        )
+
+        q_values = q_values[valid_mask]
+        relax_rate_values = relax_rate_values[valid_mask]
+        colors = [color for color, keep in zip(colors, valid_mask) if keep]
+
+        # Need at least two points for a linear fit and at least three for a
+        # stable two-parameter exponential/power-law fit.
+        min_points = 2 if model_type == 'linear' else 3
+
+        if len(q_values) < min_points:
+            ax.text(
+                0.5,
+                0.5,
+                "Not enough valid fits",
+                transform=ax.transAxes,
+                ha='center',
+                va='center',
+                fontsize=12
+            )
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+
+            print(
+                f"Skipping {model_type} model: "
+                f"not enough valid points ({len(q_values)} available)."
+            )
+
+            return np.nan, np.nan, np.nan, np.nan
+
         if model_type == 'linear':
-            # Use q_value**2 as the x-values for the linear fit
-            x_values = [q**2 for q in q_values]
-            # Call the function to perform the linear fit
+            # Use q_value**2 as the x-values for the linear fit.
+            x_values = q_values**2
+
             D, r_metric, std_err = fit_linear_model(x_values, relax_rate_values)
-            n = np.nan  # For consistency, set n to NaN for linear fits
+            n = np.nan
+
         elif model_type == 'exponential':
-            # Use q_value as the x-values for the exponential fit
+            # Use q_value as the x-values for the exponential fit.
             x_values = q_values
-            # Call the function to perform the exponential fit
-            D, n, r_metric, std_err_D, std_err_n = fit_exponential_model(x_values, relax_rate_values)
-            std_err = (std_err_D, std_err_n)  # Standard error for exponential fits
+
+            D, n, r_metric, std_err_D, std_err_n = fit_exponential_model(
+                x_values,
+                relax_rate_values
+            )
+            std_err = (std_err_D, std_err_n)
+
         else:
             raise ValueError("Invalid model_type. Supported values are 'linear' or 'exponential'.")
 
-        # Plot the model data
+        # Plot the valid model data.
         for x, y, color in zip(x_values, relax_rate_values, colors):
             ax.plot(x, y, 'o', color=color, markersize=10)
 
-        # Define the exponential function for fitting
+        # If the fit failed internally, do not try to draw a fit line.
+        if not np.isfinite(D):
+            ax.text(
+                0.5,
+                0.5,
+                "Fit failed",
+                transform=ax.transAxes,
+                ha='center',
+                va='center',
+                fontsize=12
+            )
+            ax.set_xlim(0, max(x_values) * 1.1)
+            ax.set_ylim(0, max(relax_rate_values) * 1.1)
+
+            return D, n, r_metric, std_err
+
+        # Define the exponential function for fitting.
         def exponential_function(q, D, n):
             return D * q**n
 
-        # Generate the fit line using the fitted values of D and n
+        # Generate the fit line using the fitted values.
         if model_type == 'linear':
             q_fit = np.linspace(0, max(x_values), 100)
             fit_line = D * q_fit
+
         elif model_type == 'exponential':
-            #q_fit = np.linspace(min(x_values), max(x_values), 1000)
             q_fit = np.linspace(min(x_values), max(x_values), 100)
             fit_line = exponential_function(q_fit, D, n)
+
+        # Plot the fit line only if it is finite.
+        if np.all(np.isfinite(fit_line)):
+            ax.plot(
+                q_fit,
+                fit_line,
+                linestyle='-',
+                color='black',
+                label=f"{model_type.capitalize()} Fit"
+            )
+
+        # Set axes safely.
+        x_max = max(x_values)
+        y_max = max(relax_rate_values)
+
+        if np.isfinite(x_max) and x_max > 0:
+            ax.set_xlim(0, x_max * 1.1)
         else:
-            fit_line = None
+            ax.set_xlim(0, 1)
 
-        # Plot the fit line
-        ax.plot(q_fit, fit_line, linestyle='-', color='black', label=f"{model_type.capitalize()} Fit")
-        #ax.plot(q_fit, fit_line, linestyle='-', color='black')
-
-        # Set the axes to start from zero
-        ax.set_xlim(0, (max(x_values) + 0.1 * max(x_values)))
-        ax.set_ylim(0, max(relax_rate_values) * 1.1)
-        #ax.set_ylim(0, (max(relax_rate_values) + 0.1 * max(relax_rate_values)))
+        if np.isfinite(y_max) and y_max > 0:
+            ax.set_ylim(0, y_max * 1.1)
+        else:
+            ax.set_ylim(0, 1)
 
         return D, n, r_metric, std_err
 
-    except ValueError as e:
+    except Exception as e:
         print(f"Error fitting and plotting the {model_type} model: {e}")
+
+        ax.text(
+            0.5,
+            0.5,
+            "Fit/plot error",
+            transform=ax.transAxes,
+            ha='center',
+            va='center',
+            fontsize=12
+        )
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+
         return np.nan, np.nan, np.nan, np.nan
 
-# Define the function to plot a specified param
+# Function to plot a specified param
 def plot_params(q_values, y_values, ax, cmap, param_type):
     """
-    Plot points of a derived param on a specified subplot.
+    Plot points of a derived parameter on a specified subplot.
+
+    Invalid, NaN, or infinite values are ignored. If no valid values remain,
+    a message is written in the subplot instead of raising an error.
 
     Args:
         q_values (array-like): Array of q values.
-        y_values (array-like): Array of param values (gamma or PDI).
+        y_values (array-like): Array of parameter values.
         ax (matplotlib.axes.Axes): The subplot where the plot will be generated.
         cmap (matplotlib.colors.Colormap): Colormap for point colors.
         param_type (str): Type of parameter ('gamma' or 'PDI').
@@ -2200,35 +2834,92 @@ def plot_params(q_values, y_values, ax, cmap, param_type):
         None
     """
     try:
-        # Create a color palette with the number of points
-        n_points = len(q_values)
+        q_values = np.asarray(q_values, dtype=float)
+        y_values = np.asarray(y_values, dtype=float)
 
-        # Plot the data points with labels
-        for i in range(n_points):
+        valid_mask = (
+            np.isfinite(q_values)
+            & np.isfinite(y_values)
+            & (q_values > 0)
+        )
+
+        q_values = q_values[valid_mask]
+        y_values = y_values[valid_mask]
+
+        if len(q_values) == 0:
+            ax.text(
+                0.5,
+                0.5,
+                f"No valid {param_type} values",
+                transform=ax.transAxes,
+                ha='center',
+                va='center',
+                fontsize=12
+            )
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+            return
+
+        # Plot the valid data points.
+        for i in range(len(q_values)):
             color = cmap(i)
             ax.plot(q_values[i], y_values[i], 'o', color=color, markersize=10)
 
-        # Set y-axis limits with a margin
-        if param_type.lower() == 'gamma':
-            y_min = np.min(y_values) - 0.01
-            y_max = np.max(y_values) + 0.01
-            ax.set_ylim(y_min, y_max)
-        
-        # Set y-axis limits with a small margin
-        elif param_type.lower() == 'pdi':
-            y_margin = 0.1 * (max(y_values) - min(y_values))
-            ax.set_ylim(min(y_values) - y_margin, max(y_values) + y_margin)  
+        y_min = np.min(y_values)
+        y_max = np.max(y_values)
 
-    except ValueError as e:
-        print(f"Error plotting points: {e}")
+        if not np.isfinite(y_min) or not np.isfinite(y_max):
+            ax.set_ylim(0, 1)
+            return
+
+        # Set y-axis limits with a margin.
+        if param_type.lower() == 'gamma':
+            y_margin = max(0.01, 0.1 * (y_max - y_min))
+
+            if y_max == y_min:
+                y_min -= y_margin
+                y_max += y_margin
+            else:
+                y_min -= y_margin
+                y_max += y_margin
+
+            ax.set_ylim(y_min, y_max)
+
+        elif param_type.lower() == 'pdi':
+            y_margin = max(0.01, 0.1 * (y_max - y_min))
+
+            if y_max == y_min:
+                y_min -= y_margin
+                y_max += y_margin
+            else:
+                y_min -= y_margin
+                y_max += y_margin
+
+            ax.set_ylim(y_min, y_max)
+
+    except Exception as e:
+        print(f"Error plotting {param_type} points: {e}")
+
+        ax.text(
+            0.5,
+            0.5,
+            f"{param_type} plot error",
+            transform=ax.transAxes,
+            ha='center',
+            va='center',
+            fontsize=12
+        )
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
         
 # Configure subplot with title, labels, experimental data legend, and fitted curves legend
+# Function to configure subplot with title, labels, and legend
 def configure_subplot(ax, title, xlabel, ylabel, exp_lines, exp_labels, fit_lines, fit_labels):
     """
-    Configures a subplot with title, labels, experimental data legend, and fitted curves legend.
+    Configures a subplot with title, axis labels, and a combined legend.
 
     Parameters:
-        ax (matplotlib.axes._subplots.AxesSubplot): The subplot to configure.
+        ax (matplotlib.axes.Axes): The subplot to configure.
         title (str): The title of the subplot.
         xlabel (str): The label for the x-axis.
         ylabel (str): The label for the y-axis.
@@ -2240,25 +2931,27 @@ def configure_subplot(ax, title, xlabel, ylabel, exp_lines, exp_labels, fit_line
     # Set the title and labels for the subplot
     ax.set_title(title, fontsize=16)
     ax.set_xlabel(xlabel, fontsize=14)
-    #ax.set_ylabel(ylabel, fontsize=14)
     ax.set_ylabel(ylabel.replace("Beta", "β"), fontsize=14)
 
-    # Create the legend for experimental data
-    #legend_exp = ax.legend(exp_lines, exp_labels, loc='upper right', bbox_to_anchor=(0.86, 1), borderaxespad=0)
-    #ax.add_artist(legend_exp)
+    # Combine q values and R2 values in a single legend entry
+    combined_labels = [
+        f"{exp_label} - {fit_label}"
+        for exp_label, fit_label in zip(exp_labels, fit_labels)
+    ]
 
-    # Create the legend for fitted curves
-    #legend_fit = ax.legend(fit_lines, fit_labels, loc='upper right', bbox_to_anchor=(1, 1), borderaxespad=0)
-    #ax.add_artist(legend_fit)
-
-    # Combine q and R values
-    combined_labels = [f"{exp_label} - {fit_label}" for exp_label, fit_label in zip(exp_labels, fit_labels)]
-
-    # Create the legend for experimental data
-    legend_exp = ax.legend(exp_lines, combined_labels, loc='upper right', bbox_to_anchor=(1, 1), borderaxespad=0)
-    ax.add_artist(legend_exp)
-
-    #print("Combined Labels:", combined_labels)
+    # Let Matplotlib choose the least obstructive position.
+    # This is better than forcing the legend to the upper-right corner.
+    if combined_labels:
+        legend_exp = ax.legend(
+            exp_lines,
+            combined_labels,
+            loc='best',
+            fontsize=8,
+            frameon=True,
+            framealpha=0.85,
+            borderaxespad=0.5
+        )
+        ax.add_artist(legend_exp)
 
 # Function to calculate the text position on the plot
 def calculate_text_position(q_count):
@@ -2280,6 +2973,179 @@ def calculate_text_position(q_count):
 
     return diff_coef_position
 
+# Function to add text at the least obstructive position
+def add_text_best_position(ax, text, fontsize=12):
+    """
+    Add text to an axes object using a simple automatic placement algorithm.
 
-    
+    The function tests several candidate positions in axes coordinates and
+    selects the one with the fewest plotted data points nearby. If a legend
+    already exists, positions overlapping with the legend are penalized.
+
+    Parameters:
+        ax (matplotlib.axes.Axes): Axes object where the text will be added.
+        text (str): Text to add.
+        fontsize (int): Font size for the text.
+
+    Returns:
+        matplotlib.text.Text: The added text object.
+    """
+    if text is None or text == "":
+        return None
+
+    # Candidate positions in axes coordinates.
+    # Each entry is: (x, y, horizontal alignment, vertical alignment).
+    candidates = [
+        (0.03, 0.97, 'left',   'top'),
+        (0.97, 0.97, 'right',  'top'),
+        (0.03, 0.50, 'left',   'center'),
+        (0.97, 0.50, 'right',  'center'),
+        (0.50, 0.97, 'center', 'top'),
+        (0.50, 0.03, 'center', 'bottom'),
+        (0.03, 0.03, 'left',   'bottom'),
+        (0.97, 0.03, 'right',  'bottom'),
+    ]
+
+    # Approximate text-box size in axes coordinates.
+    n_lines = text.count("\n") + 1
+    max_line_length = max(len(line) for line in text.split("\n"))
+
+    box_width = min(0.60, max(0.22, 0.010 * max_line_length))
+    box_height = min(0.35, max(0.08, 0.075 * n_lines))
+
+    # Collect plotted data in axes coordinates.
+    points_axes = []
+
+    for line in ax.lines:
+        x_data = np.asarray(line.get_xdata(), dtype=float)
+        y_data = np.asarray(line.get_ydata(), dtype=float)
+
+        valid_mask = np.isfinite(x_data) & np.isfinite(y_data)
+
+        if valid_mask.sum() == 0:
+            continue
+
+        xy_display = ax.transData.transform(
+            np.column_stack([x_data[valid_mask], y_data[valid_mask]])
+        )
+        xy_axes = ax.transAxes.inverted().transform(xy_display)
+
+        inside_mask = (
+            (xy_axes[:, 0] >= 0) & (xy_axes[:, 0] <= 1) &
+            (xy_axes[:, 1] >= 0) & (xy_axes[:, 1] <= 1)
+        )
+
+        points_axes.append(xy_axes[inside_mask])
+
+    if points_axes:
+        points_axes = np.vstack(points_axes)
+    else:
+        points_axes = np.empty((0, 2))
+
+    # Get legend box in axes coordinates, if a legend already exists.
+    legend_box = None
+    legend = ax.get_legend()
+
+    if legend is not None:
+        try:
+            ax.figure.canvas.draw()
+            renderer = ax.figure.canvas.get_renderer()
+            legend_bbox_display = legend.get_window_extent(renderer=renderer)
+            legend_bbox_axes = ax.transAxes.inverted().transform(
+                legend_bbox_display.get_points()
+            )
+
+            legend_box = (
+                legend_bbox_axes[0, 0],
+                legend_bbox_axes[1, 0],
+                legend_bbox_axes[0, 1],
+                legend_bbox_axes[1, 1]
+            )
+        except Exception:
+            legend_box = None
+
+    def get_box_limits(x, y, ha, va):
+        """Return approximate text-box limits in axes coordinates."""
+        if ha == 'left':
+            x0, x1 = x, x + box_width
+        elif ha == 'right':
+            x0, x1 = x - box_width, x
+        else:
+            x0, x1 = x - box_width / 2, x + box_width / 2
+
+        if va == 'bottom':
+            y0, y1 = y, y + box_height
+        elif va == 'top':
+            y0, y1 = y - box_height, y
+        else:
+            y0, y1 = y - box_height / 2, y + box_height / 2
+
+        return x0, x1, y0, y1
+
+    def boxes_overlap(box_a, box_b):
+        """Check whether two boxes overlap."""
+        if box_a is None or box_b is None:
+            return False
+
+        ax0, ax1, ay0, ay1 = box_a
+        bx0, bx1, by0, by1 = box_b
+
+        return not (
+            ax1 < bx0 or
+            ax0 > bx1 or
+            ay1 < by0 or
+            ay0 > by1
+        )
+
+    best_candidate = candidates[0]
+    best_score = np.inf
+
+    for candidate in candidates:
+        x, y, ha, va = candidate
+        text_box = get_box_limits(x, y, ha, va)
+        x0, x1, y0, y1 = text_box
+
+        # Penalize boxes that go outside the plot.
+        outside_penalty = 0
+        if x0 < 0 or x1 > 1 or y0 < 0 or y1 > 1:
+            outside_penalty = 1000
+
+        # Penalize overlap with plotted points.
+        if points_axes.size == 0:
+            point_overlap_score = 0
+        else:
+            overlap_mask = (
+                (points_axes[:, 0] >= x0) & (points_axes[:, 0] <= x1) &
+                (points_axes[:, 1] >= y0) & (points_axes[:, 1] <= y1)
+            )
+            point_overlap_score = overlap_mask.sum()
+
+        # Penalize overlap with the legend much more strongly.
+        legend_penalty = 0
+        if boxes_overlap(text_box, legend_box):
+            legend_penalty = 10000
+
+        score = point_overlap_score + outside_penalty + legend_penalty
+
+        if score < best_score:
+            best_score = score
+            best_candidate = candidate
+
+    x, y, ha, va = best_candidate
+
+    return ax.text(
+        x,
+        y,
+        text,
+        transform=ax.transAxes,
+        va=va,
+        ha=ha,
+        fontsize=fontsize,
+        bbox=dict(
+            facecolor='white',
+            edgecolor='none',
+            alpha=0.65,
+            pad=1.5
+        )
+    )
     
