@@ -1,773 +1,982 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# # HDF5 XPCS FitLab - Tool for analyzing X-ray Photon Correlation Spectroscopy (XPCS) data from HDF5 files.
+# # HDF5 XPCS FitLab
+# 
+# **Tool for analyzing X-ray Photon Correlation Spectroscopy (XPCS) data stored in HDF5 files.**
 # 
 # **Author:** Marilina Cathcarth [[mcathcarth@gmail.com](mailto:mcathcarth@gmail.com)]
 # 
-# **Version:** 6.8
+# **Version:** 7.0
 # 
-# **Date:** June 2026
+# **Date:** October 2026
 # 
-# **Important Note:**
+# The program reads previously calculated correlation functions, fits relaxation models, analyzes their parameters and exports the results.
 # 
-# This script relies on functions defined in the `XPCS_functions.py` file. Please ensure that `XPCS_functions.py` is located in the same directory as this script or notebook for proper execution.
+# ## Requirements
 # 
-# **Dependencies:**
+# - Python. Current synthetic-data checks were performed with Python 3.12.14.
+# - h5py, NumPy, SciPy, scikit-learn, Matplotlib and pandas.
+# - Tkinter for the selection windows.
+# - Jupyter Notebook, JupyterLab or another compatible notebook interface.
+# - A local graphical desktop session for the Tkinter windows.
 # 
-# * Python (version >= 3.8)
-# * h5py (to work with HDF5 files)
-# * numpy (for numerical calculations)
-# * scipy (for curve fitting)
-# * scikit-learn (for calculating R² scores)
-# * matplotlib (for data visualization)
-# * pandas (for data manipulation)
-# * tkinter (for the graphical user interface; usually included with Python)
+# Place `XPCS_functions.py` in the same directory as this notebook.
+# Use matching versions of the notebook and the functions module.
 # 
-# **Installation:**
+# The language-version metadata records the validation environment, not a minimum Python version.
+# Record the actual Python and dependency versions used for the experimental example.
 # 
-# 1. Make sure you have Python 3.8 or later installed.
+# ## Installation
 # 
-# 2. Install the required Python packages using pip:
+# Install the scientific dependencies in the Python environment used by the notebook:
 # 
-#    ```bash
-#    pip install h5py numpy scipy scikit-learn matplotlib pandas
-#    ```
+# ```bash
+# python -m pip install h5py numpy scipy scikit-learn matplotlib pandas
+# ```
 # 
-# 3. Make sure Tkinter is available in your Python installation. On some Linux systems, it may need to be installed separately:
+# If you need Jupyter Notebook, install it with:
 # 
-#    ```bash
-#    sudo apt install python3-tk
-#    ```
+# ```bash
+# python -m pip install notebook
+# ```
 # 
-# 4. Place the `XPCS_functions.py` file in the same directory as this script or notebook.
+# Then launch it with:
 # 
-# You are now ready to run the script for your XPCS analysis.
+# ```bash
+# jupyter notebook
+# ```
 # 
-# **Note:** If you encounter any issues, please ensure that all dependencies are correctly installed and that `XPCS_functions.py` is located in the same directory as the main script or notebook.
+# On Ubuntu, install Tkinter if it is missing:
+# 
+# ```bash
+# sudo apt install python3-tk
+# ```
+# 
+# To check Tkinter, run:
+# 
+# ```bash
+# python -m tkinter
+# ```
+# 
+# A small test window should appear.
+# 
+# ## User settings
+# 
+# The `USER SETTINGS` block at the beginning of the code cell contains the available configuration options.
+# 
+# The default settings use selection windows.
+# You can also edit the settings before running the analysis:
+# 
+# | Setting | Purpose |
+# |---|---|
+# | `R2_threshold` | Select fits for parameter averages and relaxation-rate analyses. Accepted fits require R^2 strictly above this threshold and valid derived parameters. |
+# | `directory` | Input directory. Leave `''` to select a directory or individual HDF5 files through a window. |
+# | `out_dir` | Output directory. Leave `''` to save results in the input directory. |
+# | `export_t1t2` | Export two-time matrices when available. Default: `False`. |
+# | `compare_with_beamline` | Enable the optional Sirius 3 reference-fit diagnostic. Default: `False`. |
+# | `selected_synchrotron` | Input format. Leave `None` to use the selection windows, or uncomment one manual format option. |
+# | `data_type` | Data representation for `Sirius 3` and `Sirius 3 average`: `'Originals'` or `'Rebinneds'`. Other formats use `None`. |
+# 
+# Within `USER SETTINGS`:
+# 
+# - Instructions start with `##`.
+# - Optional code lines start with a single `#`.
+# - Keep the default assignments active.
+# - For manual format selection, uncomment one format option.
+# - For either Sirius 3 format, also uncomment one data representation.
+# 
+# ## Running the analysis
+# 
+# 1. Review the `USER SETTINGS` block.
+# 2. Run the code cell.
+# 3. Complete the selection dialogs that appear.
+# 4. Review the processing summary and exported results.
+# 
+# During execution, you can choose whether to restrict the delay-time interval.
+# When a single input file is selected, you can also select the q curves to analyze.
+# 
+# Time-range controls work in both the basic selector and the live preview:
+# 
+# - Left/Right move the lower limit by one stored time position.
+# - Down/Up move the upper limit by one stored time position.
+# - Mouse dragging remains available.
+# - The live preview updates its labels and selected region after each move.
+# - Modified widget shortcuts remain available; Alt+Down opens the q preview list.
+# - While that list is open, its arrow keys navigate q values.
+# 
+# Apply Range confirms the selected positions. Closing the window, or choosing
+# Use Full Range in the preview, retains the full input interval.
+# 
+# Beamline comparison is disabled by default. Set `compare_with_beamline = True`
+# only to compare the program KWW parameters with stored Sirius 3 reference fits.
+# With `False`, reference fit parameters are not read, differences are not calculated
+# and comparison files are not written or modified. The program fits are unchanged.
+# 
+# 
+# ## Parameter interpretation and units
+# 
+# Input delay times are assumed to be in seconds and q values in angstrom^-1.
+# The readers retain the stored values; input units are not automatically validated or converted.
+# 
+# Per-curve rate/q^2 values are exported in um^2/s using a factor of 1e-8.
+# They require an appropriate physical model to be interpreted as diffusion coefficients.
+# 
+# The fixed-exponent fit is C = D_app q^2.
+# The free-exponent fit is C = K q^n, where K has units of angstrom^n/s.
+# 
+# Exported inverse rates are 1/C for the single and generalized exponential models and 1/C1 for cumulants.
+# The cumulants inverse rate is not generally the time at which the relaxation function reaches 1/e.
+# 
+# ## Outputs
+# 
+# The output directory is defined by `out_dir`.
+# When `out_dir` is empty, results are saved in the input directory.
+# 
+# | Location | Contents |
+# |---|---|
+# | Output directory | One two-page `<base>.pdf` report per processed input file. |
+# | `<base>/` | Individual fit files, correlation DataFrame exports, analysis records and optional beamline comparisons when enabled. |
+# | `<base>/t1-vs-t2/` | Two-time correlation matrices, when available. |
+# | `_summary/run_001/`, `run_002/`, ... | Combined fit-result tables and the low-R^2 report for each execution. |
+# 
+# Each `<base>_analysis_<run_id>.dat` record contains the original input filename, software version, input format, data representation, R^2 threshold, beamline-comparison setting, requested time interval and q selection.
+# Its per-q table records the number of points supplied to the models, actual time bounds, numerical status and the three fit scores.
+# The same run identifier appears on both PDF pages.
+# 
+# The correlation DataFrame export retains the available delay-time rows.
+# Individual fit files contain the selected and cleaned time-correlation pairs supplied to the models.
+# 
+# Analysis records are preserved separately for each execution.
+# PDFs and other exports retain fixed filenames and are overwritten when the same input is analyzed again in the same output directory.
 
 # In[ ]:
 
 
+#=======================================================================#
+#                                IMPORTS                                #
+#=======================================================================#
+
+# Standard library
 import os
-import sys
-from XPCS_functions import select_synchrotron, select_directory_or_files, generate_base_name
-from XPCS_functions import ask_user_for_t_range, get_t_range_limits, ask_user_for_select_q
-from XPCS_functions import initialize_error_and_success_counters, save_dataframe_to_tsv, save_t1t2_data, initialize_fit
-from XPCS_functions import process_sirius1_data, process_sirius2_data, process_sirius3_data, process_sirius3m_data, process_sirius3_fit
-from XPCS_functions import process_aps_data, process_esrf_data, clean_series
-import warnings
-import tkinter as tk
-from XPCS_functions import GraphWindow
-from XPCS_functions import initialize_data_for_parameter_averages, initialize_plot, initialize_data_for_derived_params
-import pandas as pd
-import matplotlib.pyplot as plt
-import re
-from XPCS_functions import fit_single_exponential, fit_stretched_exponential, fit_cumulants, fit_and_plot_model, compare_fit_parameters
-import math
-from XPCS_functions import calculate_relaxation_and_diffusion
-from XPCS_functions import add_data_to_table, write_dat_file
-from XPCS_functions import update_parameter_tracking_r, calculate_average_parameter_values
-from statistics import mean, stdev, StatisticsError
-from XPCS_functions import plot_data_and_curves, plot_params, configure_subplot, calculate_text_position, add_text_best_position 
-from matplotlib.backends.backend_pdf import PdfPages
-from XPCS_functions import print_summary, generate_fit_results_tables
 
-# R2 Threshold
-# This variable represents the minimum R-squared (R2) value required for a fit to be considered
-# valid and included in the calculation of average parameter values. Fits with an R2 value
-# below this threshold will be excluded from the averaging process.
+# Scientific libraries
+import numpy as np
 
+# XPCS analysis functions
+from XPCS_functions import (
+    # Directory and file handling
+    AnalysisStopped, select_synchrotron, list_hdf5_files, select_directory_or_files,
+    prepare_output_names, prepare_output_directory, prepare_summary_directory,
+    ask_user_for_t_range, generate_alphabetic_suffix,
+    # HDF5 readers
+    read_hdf5_file,
+    # Data cleaning and selection
+    extract_q_values, clean_series, get_t_range_limits, get_time_bounds,
+    ask_user_for_select_q, select_q_columns,
+    # Data export
+    save_dataframe_to_tsv, save_t1t2_data,
+    # Initializations
+    initialize_error_and_success_counters, initialize_data_for_parameter_averages,
+    initialize_plot, initialize_data_for_derived_params,
+    # Fit models and comparison
+    fit_single_exponential, fit_stretched_exponential, fit_cumulants,
+    compare_fit_parameters,
+    # Calculations and data processing
+    calculate_relaxation_and_diffusion, calculate_pdi, update_parameter_tracking,
+    calculate_average_parameter_values,
+    # Result saving and reporting
+    initialize_analysis_record, record_analysis_curve, save_analysis_record,
+    record_fit_status, add_data_to_table, write_dat_file, save_figures_to_pdf,
+    save_fit_variations, print_summary, generate_fit_results_tables,
+    # Plotting and visualization
+    add_analysis_details, plot_data_and_curves, fit_and_plot_model, annotate_rate_fit,
+    plot_params, configure_subplot, add_text_best_position,
+)
+
+## =================================================================== ##
+##                           USER SETTINGS                             ##
+## =================================================================== ##
+## Edit the values below or uncomment the available options.
+## Instructions start with ##.
+## Optional code lines start with a single #.
+## =================================================================== ##
+
+## -------------------------- FIT SELECTION -------------------------- ##
+
+## R^2 threshold for selecting fits for parameter averages.
+## Include only fits with R^2 strictly greater than this threshold.
+## Fits at or below the threshold are excluded from the averages.
+## Parameter tracking also requires finite derived values.
 R2_threshold = 0.9
 
-#--------------------- Directory and File Handling ---------------------#
+## ---------------------- INPUT AND OUTPUT PATHS --------------------- ##
 
-# Default directory (can be left empty)
+## Input directory: leave empty to open the selection window.
 directory = ''
-# Default directory for output data (can be left empty)
-# If left empty, the output data will be saved in the same directory as the input data.
+
+## Output directory: leave empty to save in the input directory.
 out_dir = ''
 
-# Manually set synchrotron version and data type to avoid GUI; leave all commented to enable window selection
+## ------------------------- OPTIONAL EXPORTS ------------------------ ##
+
+## Export two-time correlation matrices as text files.
+## Set False to skip this export; g2 fitting is unchanged.
+export_t1t2 = False
+
+## ---------------------- OPTIONAL COMPARISON ----------------------- ##
+
+## Compare with stored Sirius 3 reference fits for diagnostic checks.
+## Set True only when this comparison is explicitly needed.
+## False skips reference-fit reading, differences and comparison exports.
+compare_with_beamline = False
+
+## -------------------------- INPUT FORMAT --------------------------- ##
+
+## Keep these defaults active.
+## A manual selection below overrides these values.
+selected_synchrotron = None
+data_type = None
+
+## Uncomment ONE format option below.
+## Leave all options commented to use the selection windows.
+
 ## SIRIUS
-# version 1 (May, 2023)
+## Version 1 (May, 2023)
 #selected_synchrotron, data_type = 'Sirius 1', None
-# version 2 (October, 2023)
+
+## Version 2 (October, 2023)
 #selected_synchrotron, data_type = 'Sirius 2', None
-# version 3 (January, 2024)
+
+## Version 3 (January, 2024)
 #selected_synchrotron = 'Sirius 3'
-# version 3 (January, 2024)(Average)
+
+## Version 3 (Average)
 #selected_synchrotron = 'Sirius 3 average'
-# For version 3 select data type:
+
+## For either Sirius 3 format, also uncomment ONE data representation.
+## Original data:
 #data_type = 'Originals'
+## Multi-tau data:
 #data_type = 'Rebinneds'
 
-# Get the list of .hdf5 files in the directory (if directory is defined)
-if directory:
-    hdf5_files = [file for file in os.listdir(directory) if file.lower().endswith(('.hdf5', '.h5'))]
+## APS
+#selected_synchrotron, data_type = 'APS', None
 
-# Get the selected synchrotron and data
-selected_synchrotron, data_type = select_synchrotron()
+## ESRF
+#selected_synchrotron, data_type = 'ESRF', None
 
-# Exit if no synchrotron selected
+## =================================================================== ##
+##                        END OF USER SETTINGS                         ##
+## =================================================================== ##
+
+#=======================================================================#
+#                 INPUT SELECTION AND OUTPUT PREPARATION                #
+#=======================================================================#
+
+# Get the selected synchrotron and data representation when not set manually.
 if selected_synchrotron is None:
-    print("User closed the window.")
-    sys.exit()
-    
-# Call the select_directory_or_files function only if the directory is not defined
-if not directory:
+    selected_synchrotron, data_type = select_synchrotron()
+
+# Initialize the file list before directory selection.
+hdf5_files = None
+
+# Get HDF5 filenames from the manually defined directory.
+if directory:
+    hdf5_files = list_hdf5_files(directory)
+
+# Select a directory or files when no directory was provided
+# or the manually defined directory could not be read.
+if hdf5_files is None:
     directory, hdf5_files = select_directory_or_files()
 
-# Exit if no .hdf5 files are found
+# Stop if no HDF5 files were selected or found.
 if not hdf5_files:
-    print("No .hdf5 files found in the directory.")
-    sys.exit()
-        
-#--------------------- Initializations ---------------------#
+    raise AnalysisStopped("No HDF5 files selected or found.")
+    
+# Prepare distinct output names before processing any files.
+output_names_by_file = prepare_output_names(selected_synchrotron, hdf5_files)
 
-# Initialize error and success counters using the dictionary
+# Create and check the output directory.
+# Use the input directory when out_dir is empty.
+output_directory = prepare_output_directory(directory, out_dir)
+
+# Create a separate summary directory for this execution.
+summary_directory = prepare_summary_directory(output_directory)
+
+#=======================================================================#
+#                          BATCH INITIALIZATION                         #
+#=======================================================================#
+
+# Initialize the dictionary of error and success counters.
 counters = initialize_error_and_success_counters()
 
-# Initialize empty lists for table data
+# Initialize empty lists for table data.
 table_data = {
     "single": [],     # Empty list for single table data
     "stretched": [],  # Empty list for stretched table data
     "cumulants": []   # Empty list for cumulants table data
 }
 
-#--------------------- Flags and Control Variables ---------------------#
-    
-# Flag to indicate whether there are multiple files
-#multiple_files = len(hdf5_files) > 1
-#multiple_files = True
-
-# Flag to indicate the first iteration of the loop
+# Select a delay-time interval using the first dataset with a usable interval.
+# Reuse the selected time bounds for subsequent files.
 first_iteration = True
-    
-# Variable to store the user's choice for defining the range
+
+# Ask once whether to select a delay-time interval for fitting.
 define_t_range = ask_user_for_t_range()
 
-# User's choice for range definition in case of multiple files
-#if multiple_files:
-#    define_t_range = ask_user_for_t_range()
+#=======================================================================#
+#                          PROCESS INPUT FILES                          #
+#=======================================================================#
 
-#--------------------- Suppress Warnings ---------------------#
-
-# Suppress XDG_SESSION_TYPE warning
-os.environ["QT_QPA_PLATFORM"] = "offscreen"
-
-# Suppress all warnings
-#warnings.simplefilter("ignore")
-
-warnings.filterwarnings('ignore', category=UserWarning, module='matplotlib')
-
-
-#####################################
-##### Loop over each .hdf5 file #####
-#####################################
+## Loop over each .hdf5 file ##
 
 for hdf5_file in hdf5_files:
     file_path = os.path.join(directory, hdf5_file)
 
-    counters['hdf5_files'] += 1  # +++ Increment the hdf5_file counter +++
-
-    # Generate the appropriate base name for output file naming based on selected synchrotron
-    base_name = generate_base_name(selected_synchrotron, hdf5_file)
+    counters['hdf5_files'] += 1    # Increment the hdf5_file counter
     
-    #**************************************************************#
+    #-------------------------------------------------------------------#
+    #                       READ CORRELATION DATA                       #
+    #-------------------------------------------------------------------#
+
     # Obtain g2 vs. t data for each q value and create a DataFrame #
-    #**************************************************************#
+    dataset_df, t1t2_dfs, fit_parameters_dict = read_hdf5_file(
+        file_path, selected_synchrotron, data_type,
+        compare_with_beamline=compare_with_beamline)
 
-    try:
-        # Process 'Sirius version 1' data and get the DataFrame
-        if selected_synchrotron == 'Sirius 1':
-            dataset_df = process_sirius1_data(file_path)
-            
-        # Process 'Sirius version 2' data and get the DataFrame
-        elif selected_synchrotron == 'Sirius 2':
-            dataset_df, t1t2_dfs = process_sirius2_data(file_path)
-            
-        # Process 'Sirius version 3' data and get the DataFrame
-        elif selected_synchrotron == 'Sirius 3':
-            dataset_df, t1t2_dfs = process_sirius3_data(file_path,data_type)
-            # Get the beamline fit parameters
-            fit_results_df = process_sirius3_fit(file_path, data_type)
-            # Initialize the dictionary mapping q_values to fit parameters and the fit variations list
-            fit_parameters_dict, fit_variations = initialize_fit(fit_results_df)
+    # Record and skip files whose correlation curves could not be read.
+    if dataset_df is None:
+        counters['invalid_data'] += 1
+        counters['invalid_files'].append(f"{hdf5_file}: correlation read failed")
+        continue
+
+    # Retrieve the output base name prepared for this input file.
+    base_name = output_names_by_file[hdf5_file]
+
+    # Initialize the comparison rows for the current file.
+    fit_variations = []
     
-        # Process 'Sirius version 3m' data and get the DataFrame
-        elif selected_synchrotron == 'Sirius 3 average':
-            dataset_df = process_sirius3m_data(file_path,data_type)
-        
-        # Process 'APS' data and get the DataFrame
-        elif selected_synchrotron == 'APS':
-            dataset_df = process_aps_data(file_path)
-            
-        # Process 'ESRF' data and get the DataFrame
-        elif selected_synchrotron == 'ESRF':
-            dataset_df = process_esrf_data(file_path)
-        
-        # Check if the DataFrame is None, indicating a failure in data processing
-        if dataset_df is None:
-            print(f"Warning: Data could not be processed for file '{hdf5_file}'. Skipping.")
-            #sys.exit()        # Terminate the program to handle the error or exception
-            continue           # Skip to the next file in the loop
+    #-------------------------------------------------------------------#
+    #                         PREPARE q COLUMNS                         #
+    #-------------------------------------------------------------------#
+    
+    # Extract q values and sort the correlation columns numerically.
+    q_values_by_column = extract_q_values(dataset_df)
+    q_columns_df = sorted(
+        q_values_by_column, key=q_values_by_column.get)
+    
+    # Record and skip files without recognizable correlation columns.
+    if not q_columns_df:
+        counters['invalid_data'] += 1
+        counters['invalid_files'].append(f"{hdf5_file}: no recognizable g2 columns")
 
-    except Exception as e:
-        print(f"Warning: Could not process file '{hdf5_file}'. Reason: {e}")
-        continue  # Skip this file and proceed with the next one
-            
+        print(f"Warning: No valid g2 columns were found in '{hdf5_file}'. Skipping.")
+        continue
+
+    # Reorder the DataFrame columns, keeping '# t' at the beginning.
+    dataset_df = dataset_df[['# t'] + q_columns_df]
+
     # +++ Increment the q_values counter +++
-    q_count = dataset_df.shape[1] - 1       # Subtract 1 to exclude the 't' column
-    counters['q_values'] += q_count     
+    q_count = len(q_columns_df)  # Correlation curves before q selection.
+    counters['q_values'] += q_count
     
-    # Define the range.
-    # If only one file is processed, show the graphical preview.
-    # If multiple files are processed, use the simple slider only once.
+    #-------------------------------------------------------------------#
+    #                   SELECT THE DELAY-TIME INTERVAL                  #
+    #-------------------------------------------------------------------#
+
+    # Define the range once, using the first valid dataset.
+    # Single input file: graphical preview.
+    # Multiple input files: simple slider only once.
     if first_iteration:
         show_range_preview = len(hdf5_files) == 1
 
         lower_limit, upper_limit = get_t_range_limits(
-            dataset_df,
-            define_t_range,
-            show_preview=show_range_preview
-        )
+            dataset_df, define_t_range, show_preview=show_range_preview)
 
-        first_iteration = False                 # Set the flag to False             
-    
-    #***** Save the data to a .dat file (CSV format with tab delimiter) *****#
+        # Keep time bounds for all files, rather than shared row positions.
+        time_range = None
+        if define_t_range:
+            # Add 1 to include the upper limit.
+            selected_times = dataset_df['# t'].iloc[lower_limit:upper_limit + 1]
+            time_range = get_time_bounds(selected_times)
             
-    # Specify the output file path
-    if out_dir:                             # Check if out_dir is defined (not empty)
-        output_dataframe = os.path.join(out_dir, f"{base_name}_export_DataFrame.dat")
-    else: 
-        output_dataframe = os.path.join(directory, f"{base_name}_export_DataFrame.dat")
+            # Record this file and its curves when the interval has no finite times.
+            # Try range selection again with the next file.
+            if time_range is None:
+                counters['invalid_data'] += 1
+                counters['invalid_files'].append(
+                    f"{hdf5_file}: no finite times in the selected interval")
+                counters['skipped_q'] += q_count
+                continue
 
-    warnings.filterwarnings("ignore")
-    #warnings.filterwarnings("ignore", category=FutureWarning)
+        first_iteration = False  # Set the flag to False.
+
+    #-------------------------------------------------------------------#
+    #               PREPARE EXPORT PATHS AND TWO-TIME DATA              #
+    #-------------------------------------------------------------------#
     
-    # Sort the columns by 'q' values
-    q_columns_df = sorted(
-        [col for col in dataset_df.columns if re.match(r"g2\(q=\d+\.\d+\)", col)],
-        key=lambda x: float(re.search(r"q=(\d+\.\d+)", x).group(1)))
+    # Create the data directory for the current input file.
+    file_output_directory = prepare_output_directory(
+        os.path.join(output_directory, base_name))
+
+    # Define the final correlation-DataFrame output path.
+    output_dataframe = os.path.join(
+        file_output_directory, f"{base_name}_export_DataFrame.dat")
     
-    # Reorder the DataFrame columns, keeping '# t' at the beginning
-    dataset_df = dataset_df[['# t'] + q_columns_df]
+    # Export available two-time matrices when requested.
+    if export_t1t2 and t1t2_dfs:
+        # Save available t1-t2 matrices inside the current file's data directory.
+        save_t1t2_data(t1t2_dfs, file_output_directory, base_name)
 
-    # Save DataFrame to a tab-separated values (TSV) file.
-    save_dataframe_to_tsv(dataset_df, output_dataframe)
-
-    # Save t1-t2 DataFrame to a tab-separated values (TSV) file for Sirius 3 in t1-vs-t2 directory
-    if selected_synchrotron == 'Sirius 2' or selected_synchrotron == 'Sirius 3':
-        if out_dir:
-            save_t1t2_data(t1t2_dfs, out_dir, base_name)
-        else:
-            save_t1t2_data(t1t2_dfs, directory, base_name)
-
-    #--------------------- Initializations ---------------------#
+    #-------------------------------------------------------------------#
+    #              INITIALIZE PER-FILE RESULTS AND FIGURES              #
+    #-------------------------------------------------------------------#
     
     # Initialize data structures for parameter averages
     parameter_averages_data = initialize_data_for_parameter_averages()
     
     # Call the function to initialize the plot
-    fig1, (ax_single, ax_stretched, ax_cumulants, ax_Cq2_si, ax_Cq_si), fig2, (ax_Cq2_st, ax_Cq_st, ax_gammaq, ax_Cq2_cu, ax_Cq_cu, ax_PDIq), cmap, lines_labels_dict = initialize_plot(q_count)
+    (fig1, (ax_single, ax_stretched, ax_cumulants, ax_Cq2_si, ax_Cq_si), 
+    fig2, (ax_Cq2_st, ax_Cq_st, ax_gammaq, ax_Cq2_cu, ax_Cq_cu, ax_PDIq), 
+    cmap, lines_labels_dict) = initialize_plot(q_count)
 
     # Initialize empty lists for derived and qualified parameters
     derived_params, qualified_params = initialize_data_for_derived_params()
     
-    #--------------------- --------------- ---------------------#
+    # Keep each column's color before optional q selection.
+    q_colors_by_column = {column: cmap(index)
+                          for index, column in enumerate(dataset_df.columns[1:])}
     
-    #############################################################
+    #-------------------------------------------------------------------#
+    #                 SELECT q COLUMNS FOR A SINGLE FILE                #
+    #-------------------------------------------------------------------#
+
     # If single file:
     if len(hdf5_files) == 1:
-        
+
         # Ask the user if they want to select q values
         select_q_values = ask_user_for_select_q()
-        
+
         if select_q_values:
             # Create a copy of the dataset
             original_dataset_df = dataset_df.copy()
 
-            # Create the Tkinter window
-            root = tk.Tk()
+            # Open the selection window and get the resulting dataset
+            dataset_df = select_q_columns(
+                dataset_df, lower_limit, upper_limit, cmap)
 
-            # Create an instance of the GraphWindow class
-            graph_window = GraphWindow(root, dataset_df, lower_limit, upper_limit, cmap)
-            #graph_window = GraphWindow(root, dataset_df, cmap)
-
-            # Start the Tkinter event loop
-            root.mainloop()
-    
-            # Get the updated dataset after closing the window
-            dataset_df = graph_window.select_values()
-
-            # Close the Tkinter window
-            root.quit()
-            root.destroy()
-
-            ## Save the original DataFrame to a tab-separated values (TSV) file.
-
-            # Specify the output file path
-            output_df_original = os.path.join(directory, f"{base_name}_export_DForiginal.dat")
-            # Save DataFrame to a TSV file.
+            # Save the original DataFrame as tab-separated text.
+            # Use the current file's data directory.
+            output_df_original = os.path.join(
+                file_output_directory, f"{base_name}_export_DForiginal.dat")
+            # Save DataFrame to a TSV file
             save_dataframe_to_tsv(original_dataset_df, output_df_original)
-
-    #############################################################
     
-    ##################################
-    ##### Loop over each q value #####
-    ##################################
+    #-------------------------------------------------------------------#
+    
+    # Count curves removed by the optional q selection
+    counters['excluded_q'] += q_count - (len(dataset_df.columns) - 1)
+    
+    # Record settings and q selection for the current input file.
+    analysis_record = initialize_analysis_record(
+        file_path, base_name, selected_synchrotron, data_type,
+        R2_threshold, time_range, q_values_by_column, dataset_df.columns[1:],
+        compare_with_beamline=compare_with_beamline)
+    
+    #-------------------------------------------------------------------#
+    #                       PROCESS EACH q SERIES                       #
+    #-------------------------------------------------------------------#
+    
+    ## Loop over each q value ##
     
     for i, q_column in enumerate(dataset_df.columns[1:], 1):
+        
+        #---------------- PREPARE THE CURRENT q SERIES -----------------#
 
-        # Extract the q value from the column name
-        match = re.search(r"q=(\d+\.\d+)", q_column)
-        if match:
-            q_value = float(match.group(1))
-            
+        # Retrieve the q value already extracted from the column name
+        q_value = q_values_by_column[q_column]
+
         # Get the 't' and 'g2' data for the current q value
         t = dataset_df['# t']
         g2 = dataset_df[q_column]
-        
-        # Clean it
-        t, g2 = clean_series(t, g2, min_points=8, return_pandas=True)
 
-        # If too few points remain -> skip this q
+        # Apply the selected time interval once, before cleaning
+        if time_range is not None:
+            t_min, t_max = time_range
+
+            # Include both limits and keep the time-correlation pairs aligned
+            selected_rows = (t >= t_min) & (t <= t_max)
+            t = t.loc[selected_rows]
+            g2 = g2.loc[selected_rows]
+
+        # Remove nonfinite pairs and a leading zero-delay sample
+        # Require at least eight remaining points
+        t, g2 = clean_series(t, g2, min_points=8, return_pandas=True)
+        
+        # Count and skip curves with too few points after cleaning
         if t is None:
-            #failed_list.append((base_name, q_value))
+            record_analysis_curve(analysis_record, q_value)
+            counters['skipped_q'] += 1
+            print(f"Warning: Skipping '{hdf5_file}', q = {q_value}: "
+                  "fewer than 8 valid points in the analysis interval.")
             continue
 
-        # If the user has chosen to define the range of 't', apply the specified lower and upper limits
-        if define_t_range:
-            # Slice the values of 't' and 'g2' using the provided indices
-            t = t.iloc[lower_limit:upper_limit + 1]               # Adding 1 to include the upper limit
-            g2 = g2.iloc[lower_limit:upper_limit + 1]             # Adding 1 to include the upper limit
-
-        # Create the output filename
-        output_name = f"{base_name}_export_{chr(ord('a')+i-1)}.dat"
-
-        # Generate the complete output file path
-        if out_dir:
-            output_path = os.path.join(out_dir, output_name)
-        else:
-            output_path = os.path.join(directory, output_name)
-
-        if selected_synchrotron == 'Sirius 3':
-            # Retrieve beamline fit parameters for the current q_value
-            beamline_fit_params = fit_parameters_dict.get(q_value, None)
+        # Create the output filename, continuing with aa, ab, ... after z
+        suffix = generate_alphabetic_suffix(i)
+        output_name = f"{base_name}_export_{suffix}.dat"
         
-        #------------------------------------------------------#
-        #--------------------- Fit models ---------------------#
-        #------------------------------------------------------#
-        
-        #---------- Fit the Single Exponential Model ----------#
-        
-        # Fit Single Exponential Model
-        fit_params_single, fitted_curve_single, r2_single = fit_single_exponential(t, g2)
-        
-        # Add the filename to the list if fitting fails
-        if math.isnan(r2_single): 
-            counters['failure'] += 1        # +++ Increment the failure counter +++
-            counters['failed_files'].append(f"{base_name} - q = {q_value} A^-1")
+        # Save individual q results in the current file's data directory.
+        output_path = os.path.join(file_output_directory, output_name)
 
-        # Calculate Relaxation time and Diffusion coefficient for Single Exponential
-        relax_time_single, diffusion_coef_single = calculate_relaxation_and_diffusion(fit_params_single, q_value)
-            
-        #--------- Fit the Stretched Exponential model ---------#
         
-        # Fit Stretched Exponential Model
-        fit_params_stretched, fitted_curve_stretched, r2_stretched = fit_stretched_exponential(t, g2, fit_params_single)
+        #---------------------------------------------------------------#
+        #-------------------- FIT THE THREE MODELS ---------------------#
+
+        #----- Fit the Single Exponential Model -----#
+
+        # Fit A, B and C in the Single Exponential Model
+        fit_params_single, fitted_curve_single, r2_single = (
+            fit_single_exponential(t, g2))
+
+        # Calculate relaxation time and C/q^2 for Single Exponential
+        relax_time_single, diffusion_coef_single = (
+            calculate_relaxation_and_diffusion(fit_params_single, q_value))
+
+        #----- Fit the Stretched Exponential model -----#
+
+        # Fit C and gamma with A and B fixed from the Single Exponential fit
+        fit_params_stretched, fitted_curve_stretched, r2_stretched = (
+            fit_stretched_exponential(t, g2, fit_params_single))
+
+        # Calculate relaxation time and C/q^2 for Stretched Exponential
+        relax_time_stretched, diffusion_coef_stretched = (
+            calculate_relaxation_and_diffusion(fit_params_stretched, q_value))
+
+        #----- Analysis by the method of Cumulants -----#
+
+        # Fit C1 and C2 with A and B fixed from the Single Exponential fit
+        fit_params_cumulants, fitted_curve_cumulants, r2_cumulants = (
+            fit_cumulants(t, g2, fit_params_single))
+
+        # Calculate relaxation time and C1/q^2 for Cumulants
+        relax_time_cumulants, diffusion_coef_cumulants = (
+            calculate_relaxation_and_diffusion(fit_params_cumulants, q_value))
+
+        #-----     -----     -----     -----     -----     -----#
+        # Record the numerical status of this q series once
+        record_fit_status(
+            counters, hdf5_file, q_value, (r2_single, r2_stretched, r2_cumulants))
         
-        if math.isnan(r2_stretched):
-            # Create the filename string
-            failed_file = f"{base_name} - q = {q_value} A^-1"
-            # Add the filename to the list if it's not already present
-            if failed_file not in counters['failed_files']:
-                counters['failure'] += 1       # +++ Increment the failure counter +++
-                counters['failed_files'].append(failed_file)
+        # Record the cleaned times actually supplied to the models.
+        record_analysis_curve(
+            analysis_record, q_value, t, (r2_single, r2_stretched, r2_cumulants))
 
-        # Calculate Relaxation time and Diffusion coefficient for Stretched Exponential
-        relax_time_stretched, diffusion_coef_stretched = calculate_relaxation_and_diffusion(fit_params_stretched, q_value)
-        
-        #--------- Analysis by the method of Cumulants ---------#
-        
-        # Fit Cumulants Model
-        fit_params_cumulants, fitted_curve_cumulants, r2_cumulants = fit_cumulants(t, g2, fit_params_single)
-        
-        if math.isnan(r2_cumulants):
-            # Create the filename string
-            failed_file = f"{base_name} - q = {q_value} A^-1"
-            # Add the filename to the list if it's not already present
-            if failed_file not in counters['failed_files']:
-                counters['failure'] += 1       # +++ Increment the failure counter +++
-                counters['failed_files'].append(failed_file)
+        #---------------- STORE AND EXPORT FIT RESULTS -----------------#
 
-        # Calculate Relaxation time and Diffusion coefficient for Cumulants
-        relax_time_cumulants, diffusion_coef_cumulants = calculate_relaxation_and_diffusion(fit_params_cumulants, q_value)
+        # Retrieve the Single Exponential parameters: A, B, C.
+        A_single, B_single, C_single = fit_params_single
 
-        #******************************************************#
-        #** Append data to the table and save to a .dat file **#
-        #******************************************************#
+        # Append data to the table for Single Exponential.
+        add_data_to_table(
+            table_data["single"], base_name, q_value, fit_params_single,
+            relax_time_single, diffusion_coef_single, r2_single)
 
-        # for Single Exponential
-        A_single = fit_params_single[0]
-        B_single = fit_params_single[1]
-        C_single = fit_params_single[2]
-        # Append data to the table for Single Exponential
-        add_data_to_table(table_data["single"], base_name, q_value, [A_single, B_single, C_single], relax_time_single, diffusion_coef_single, r2_single)
+        # Retrieve the Stretched Exponential parameters: A, B, C, gamma.
+        A_stretched, B_stretched, C_stretched, gamma_stretched = fit_params_stretched
 
-        # for Stretched Exponential
-        A_stretched = fit_params_stretched[0]
-        B_stretched = fit_params_stretched[1]
-        C_stretched = fit_params_stretched[2]
-        gamma_stretched = fit_params_stretched[3]
-        # Append data to the table for Stretched Exponential
-        add_data_to_table(table_data["stretched"], base_name, q_value, [A_stretched, B_stretched, C_stretched, gamma_stretched], relax_time_stretched, diffusion_coef_stretched, r2_stretched)
-            
-        # for Cumulants Model
-        A_cumulants = fit_params_cumulants[0]
-        B_cumulants = fit_params_cumulants[1]
-        C1_cumulants = fit_params_cumulants[2]
-        C2_cumulants = fit_params_cumulants[3]
-        PDI_cumulants = C2_cumulants / C1_cumulants**2
-        # Append data to the table for Cumulants Model
-        add_data_to_table(table_data["cumulants"], base_name, q_value, [A_cumulants, B_cumulants, C1_cumulants, PDI_cumulants], relax_time_cumulants, diffusion_coef_cumulants, r2_cumulants)
-            
-        # Write data to .dat file for Single Exponential, Stretched Exponential and Cumulants
-        write_dat_file(output_path, q_value, t, g2, A_single, B_single, C_single, A_stretched, B_stretched, C_stretched, gamma_stretched,
-            r2_single, r2_stretched, relax_time_single, relax_time_stretched, diffusion_coef_single, diffusion_coef_stretched,
-            A_cumulants, B_cumulants, C1_cumulants, C2_cumulants, r2_cumulants, relax_time_cumulants, diffusion_coef_cumulants)
+        # Append data to the table for Stretched Exponential.
+        add_data_to_table(
+            table_data["stretched"], base_name, q_value, fit_params_stretched,
+            relax_time_stretched, diffusion_coef_stretched, r2_stretched)
 
-        #********************************************************#
-        #***** Add the data for derived params in the lists *****#
-        #********************************************************#
-        
+        # Retrieve the Cumulants parameters: A, B, C1, C2.
+        A_cumulants, B_cumulants, C1_cumulants, C2_cumulants = fit_params_cumulants
+
+        # Calculate PDI from the cumulants, returning NaN when undefined.
+        PDI_cumulants = calculate_pdi(C1_cumulants, C2_cumulants)
+
+        # Append data to the table for Cumulants.
+        # The summary table stores PDI in place of C2.
+        add_data_to_table(
+            table_data["cumulants"], base_name, q_value,
+            [A_cumulants, B_cumulants, C1_cumulants, PDI_cumulants],
+            relax_time_cumulants, diffusion_coef_cumulants, r2_cumulants)
+
+        # Write data and results for all three models to the individual file.
+        # Pass C2 to reconstruct the cumulants curve.
+        write_dat_file(
+            output_path=output_path, q_value=q_value, t=t, g2=g2,
+
+            # Single Exponential results.
+            A_single=A_single, B_single=B_single, C_single=C_single,
+            r2_single=r2_single, relax_time_single=relax_time_single,
+            diffusion_coef_single=diffusion_coef_single,
+
+            # Stretched Exponential results.
+            A_stretched=A_stretched, B_stretched=B_stretched,
+            C_stretched=C_stretched, gamma=gamma_stretched,
+            r2_stretched=r2_stretched,
+            relax_time_stretched=relax_time_stretched,
+            diffusion_coef_stretched=diffusion_coef_stretched,
+
+            # Cumulants results.
+            A_cumulants=A_cumulants, B_cumulants=B_cumulants,
+            C1_cumulants=C1_cumulants, C2_cumulants=C2_cumulants,
+            r2_cumulants=r2_cumulants,
+            relax_time_cumulants=relax_time_cumulants,
+            diffusion_coef_cumulants=diffusion_coef_cumulants
+        )
+
+        #----------------- COLLECT DERIVED PARAMETERS ------------------#
+
+        # Store q and q^2 for the relaxation-rate analyses.
         derived_params["q_value"].append(q_value)
         derived_params["q_square"].append(q_value**2)
+
+        # Store relaxation rates and model-specific parameters.
         derived_params["relax_rate_single"].append(C_single)
         derived_params["relax_rate_stretched"].append(C_stretched)
         derived_params["gamma"].append(gamma_stretched)
         derived_params["relax_rate_cumulants"].append(C1_cumulants)
         derived_params["PDI"].append(PDI_cumulants)
         
-        #********************************************************#
-        
-        ########################################################
-        ### Plot the experimental data and the fitted curves ###
-        ########################################################
+        # Store the original color of this processed curve.
+        derived_params["color"].append(q_colors_by_column[q_column])
 
-        color = cmap(i-1)  # Get color based on index
+        #------------------- PLOT CORRELATION CURVES -------------------#
+
+        # Keep the color assigned before optional q selection.
+        color = q_colors_by_column[q_column]
         #print(f"i: {i}, color: {color}")
-            
-        # for Single Exponential
-        plot_data_and_curves(ax_single, t, g2, A_single, B_single, fitted_curve_single, q_value, r2_single, lines_labels_dict, color, linestyle='-', model_type = "Single")
 
-        # for Stretched Exponential
-        plot_data_and_curves(ax_stretched, t, g2, A_stretched, B_stretched, fitted_curve_stretched, q_value, r2_stretched, lines_labels_dict, color, linestyle='--', model_type = "Stretched")
-            
-        # for Method of Cumulants
-        plot_data_and_curves(ax_cumulants, t, g2, A_cumulants, B_cumulants, fitted_curve_cumulants, q_value, r2_cumulants, lines_labels_dict, color, linestyle='dotted', model_type = "Cumulants")
-            
-        #****************************************************************#
-        # Calculation of the average parameters of the fits with R > 0.9 #
-        #****************************************************************#
-            
-        # Check if r2_single is not NaN and if it's greater than R2_threshold before updating parameter tracking.
-        if not math.isnan(r2_single) and r2_single > R2_threshold:
-            update_parameter_tracking_r(parameter_averages_data, 'single', r2_single, diffusion_coef_single)
-            qualified_params["q_value_single"].append(q_value)
-            qualified_params["relax_rate_single"].append(C_single)
-            qualified_params["color_single"].append(color)
+        # Plot the Single Exponential results.
+        plot_data_and_curves(
+            ax_single, t, g2, A_single, B_single, fitted_curve_single,
+            q_value, r2_single, lines_labels_dict, color,
+            linestyle='-', model_type="Single")
 
-        elif not math.isnan(r2_single):
-            counters['below_threshold'] += 1
-            counters['below_threshold_files'].append(
-                f"{base_name} - q = {q_value} A^-1 - Single Exponential - R2 = {r2_single:.3f}"
-            )
+        # Plot the Stretched Exponential results.
+        plot_data_and_curves(
+            ax_stretched, t, g2, A_stretched, B_stretched,
+            fitted_curve_stretched, q_value, r2_stretched,
+            lines_labels_dict, color,
+            linestyle='--', model_type="Stretched")
 
-        # Check if r2_stretched is not NaN and if it's greater than R2_threshold before updating parameter tracking.
-        if not math.isnan(r2_stretched) and r2_stretched > R2_threshold:
-            update_parameter_tracking_r(parameter_averages_data, 'stretched', r2_stretched, diffusion_coef_stretched, gamma_stretched)
-            qualified_params["q_value_stretched"].append(q_value)
-            qualified_params["relax_rate_stretched"].append(C_stretched)
-            qualified_params["color_stretched"].append(color)
-            qualified_params["gamma"].append(gamma_stretched)
-
-        elif not math.isnan(r2_stretched):
-            counters['below_threshold'] += 1
-            counters['below_threshold_files'].append(
-                f"{base_name} - q = {q_value} A^-1 - Stretched Exponential - R2 = {r2_stretched:.3f}"
-            )
-
-        # Check if r2_cumulants is not NaN and if it's greater than R2_threshold before updating parameter tracking.
-        if not math.isnan(r2_cumulants) and r2_cumulants > R2_threshold:
-            update_parameter_tracking_r(parameter_averages_data, 'cumulants', r2_cumulants, diffusion_coef_cumulants, PDI_cumulants)         
-            qualified_params["q_value_cumulants"].append(q_value)
-            qualified_params["relax_rate_cumulants"].append(C1_cumulants)
-            qualified_params["color_cumulants"].append(color)
-            qualified_params["PDI"].append(PDI_cumulants)
-
-        elif not math.isnan(r2_cumulants):
-            counters['below_threshold'] += 1
-            counters['below_threshold_files'].append(
-                f"{base_name} - q = {q_value} A^-1 - Cumulants - R2 = {r2_cumulants:.3f}"
-            )
-            
-        #****************************************************************#                        
+        # Plot the Cumulants results.
+        plot_data_and_curves(
+            ax_cumulants, t, g2, A_cumulants, B_cumulants,
+            fitted_curve_cumulants, q_value, r2_cumulants,
+            lines_labels_dict, color,
+            linestyle='dotted', model_type="Cumulants")
         
-        #------------- Compare Beamline Fit Parameters for Sirius 3 -------------#
-        
-        if selected_synchrotron == 'Sirius 3':
-            # Extract code-generated fit parameters
-            code_fit_params = {'Baseline': A_stretched, 'Beta': B_stretched, 'Relax_time': relax_time_stretched, 'Gamma': gamma_stretched}
 
-            # Perform the comparison
-            variation = compare_fit_parameters(q_value, beamline_fit_params, code_fit_params)
+        #------------- SELECT FITS FOR PARAMETER AVERAGES --------------#
 
-            # Append the variation to the list
+        #-- Collect parameters from fits with R^2 > R2_threshold.
+
+        # Check that Single Exponential R^2 is finite and above the threshold.
+        if np.isfinite(r2_single) and r2_single > R2_threshold:
+            fit_included = update_parameter_tracking(
+                parameter_averages_data, 'single', diffusion_coef_single)
+
+            # Keep the selected lists aligned with the accepted averages.
+            if fit_included:
+                qualified_params["q_value_single"].append(q_value)
+                qualified_params["relax_rate_single"].append(C_single)
+                qualified_params["color_single"].append(color)
+
+        # Record finite scores at or below the threshold.
+        elif np.isfinite(r2_single):
+            counters['below_threshold'] += 1
+            counters['below_threshold_files'].append(
+                f"{hdf5_file} - q = {q_value} A^-1 - "
+                f"Single Exponential - R2 = {r2_single:.3f}")
+
+        # Check that Stretched Exponential R^2 is finite and above the threshold.
+        if np.isfinite(r2_stretched) and r2_stretched > R2_threshold:
+            fit_included = update_parameter_tracking(
+                parameter_averages_data, 'stretched',
+                diffusion_coef_stretched, gamma_stretched)
+
+            # Keep the selected lists aligned with the accepted averages.
+            if fit_included:
+                qualified_params["q_value_stretched"].append(q_value)
+                qualified_params["relax_rate_stretched"].append(C_stretched)
+                qualified_params["color_stretched"].append(color)
+                qualified_params["gamma"].append(gamma_stretched)
+
+        # Record finite scores at or below the threshold.
+        elif np.isfinite(r2_stretched):
+            counters['below_threshold'] += 1
+            counters['below_threshold_files'].append(
+                f"{hdf5_file} - q = {q_value} A^-1 - "
+                f"Stretched Exponential - R2 = {r2_stretched:.3f}")
+
+        # Check that Cumulants R^2 is finite and above the threshold.
+        if np.isfinite(r2_cumulants) and r2_cumulants > R2_threshold:
+            fit_included = update_parameter_tracking(
+                parameter_averages_data, 'cumulants',
+                diffusion_coef_cumulants, PDI_cumulants)
+
+            # Keep the selected lists aligned with the accepted averages.
+            if fit_included:
+                qualified_params["q_value_cumulants"].append(q_value)
+                qualified_params["relax_rate_cumulants"].append(C1_cumulants)
+                qualified_params["color_cumulants"].append(color)
+                qualified_params["PDI"].append(PDI_cumulants)
+
+        # Record finite scores at or below the threshold.
+        elif np.isfinite(r2_cumulants):
+            counters['below_threshold'] += 1
+            counters['below_threshold_files'].append(
+                f"{hdf5_file} - q = {q_value} A^-1 - "
+                f"Cumulants - R2 = {r2_cumulants:.3f}")
+
+        #----------------- COMPARE WITH BEAMLINE FITS ------------------#
+
+        # Compare only when explicitly enabled and references are available.
+        if compare_with_beamline and fit_parameters_dict:
+            # Retrieve the reference parameters for the current q value.
+            beamline_fit_params = fit_parameters_dict.get(q_value)
+            # Extract code-generated fit parameters.
+            code_fit_params = {
+                'Baseline': A_stretched,
+                'Beta': B_stretched,
+                'Relax_time': relax_time_stretched,
+                'Gamma': gamma_stretched}
+
+            # Perform the comparison.
+            variation = compare_fit_parameters(
+                q_value, beamline_fit_params, code_fit_params)
+
+            # Append the variation to the list.
             fit_variations.append(variation)
+            
+        #---------------------------------------------------------------#
+    
+    #-------------------------------------------------------------------#
+    #                   FIT RELAXATION RATES VERSUS q                   #
+    #-------------------------------------------------------------------#
 
-        #------------- -------------------------------------------- -------------#
-    
-    ########################################################################
-    ##################### Fit and plot derived params  #####################
-    ########################################################################
-    
-    # Disable the warning
-    warnings.filterwarnings("ignore", category=UserWarning, message="No handles with labels found to put in legend.")
-    
-    #--------------------------------------------------#
-    #----------- Fit the curve C = D * q**2 -----------#
-    #--------------------------------------------------#
-    
-    #--------- Fit C vs q^2 ---------#  #----Linear----#
-    
-    # Call the function to perform the fit and generate the plot for each model
-    D_single_linear, n_single_linear, r_single_linear, std_err_single_linear = fit_and_plot_model(qualified_params["q_value_single"], qualified_params["relax_rate_single"], ax_Cq2_si, qualified_params["color_single"], "Single - Linear", model_type='linear')
-    D_stretched_linear, n_stretched_linear, r_stretched_linear, std_err_stretched_linear = fit_and_plot_model(qualified_params["q_value_stretched"], qualified_params["relax_rate_stretched"], ax_Cq2_st, qualified_params["color_stretched"], 'Stretched - Linear', model_type='linear')
-    D_cumulants_linear, n_cumulants_linear, r_cumulants_linear, std_err_cumulants_linear = fit_and_plot_model(qualified_params["q_value_cumulants"], qualified_params["relax_rate_cumulants"], ax_Cq2_cu, qualified_params["color_cumulants"], 'Cumulants - Linear', model_type='linear')
-    
-    # Set labels and annotations for all three models
-    for ax, D_values, pearson_r_values, std_err_values in [(ax_Cq2_si, D_single_linear, r_single_linear, std_err_single_linear),
-                                                           (ax_Cq2_st, D_stretched_linear, r_stretched_linear, std_err_stretched_linear),
-                                                           (ax_Cq2_cu, D_cumulants_linear, r_cumulants_linear, std_err_cumulants_linear)]:
+    #----- Linear fit: C = D_app * q^2, with zero intercept -----#
 
-        # Set labels
-        ax.set_xlabel("$q^{2} (\AA^{-2}$)", fontsize=14)
-        ax.set_ylabel("Relaxation Rate ($s^{-1}$)", fontsize=14)
-        ax.set_title("Relax rate vs $q^{2}$ (Linear Fit)", fontsize=16)
-        #ax.legend()
+    # Fit and plot C versus q^2 for each model, with zero intercept.
+    D_single_linear, n_single_linear, r_single_linear, std_err_single_linear = (
+        fit_and_plot_model(qualified_params["q_value_single"],
+                           qualified_params["relax_rate_single"],
+                           ax_Cq2_si, qualified_params["color_single"],
+                           "Single - Linear", model_type='linear'))
 
-        # Annotate the graph with slopes (D) and Pearson correlation coefficients (pearson_r)
-        slope_annotation = f"Slope (D) = {D_values:.2e}"
-        r_annotation = f"Pearson r = {pearson_r_values:.4f}"
+    D_stretched_linear, n_stretched_linear, r_stretched_linear, std_err_stretched_linear = (
+        fit_and_plot_model(qualified_params["q_value_stretched"],
+                           qualified_params["relax_rate_stretched"],
+                           ax_Cq2_st, qualified_params["color_stretched"],
+                           "Stretched - Linear", model_type='linear'))
 
-        # Annotate the graph with diffusion coefficient and standard deviation
-        diff_coef = D_values / 1e8
-        std_err_diff_coef = std_err_values / 1e8
-        diff_coef_annotation = fr"Diffusion Coefficient ($\mu m^2/s$) = {diff_coef:.4f} ({std_err_diff_coef:.4f})"
+    D_cumulants_linear, n_cumulants_linear, r_cumulants_linear, std_err_cumulants_linear = (
+        fit_and_plot_model(qualified_params["q_value_cumulants"],
+                           qualified_params["relax_rate_cumulants"],
+                           ax_Cq2_cu, qualified_params["color_cumulants"],
+                           "Cumulants - Linear", model_type='linear'))
 
-        # Get the coordinates of the graph label
-        label_x, label_y = 0.02, ax.get_ylim()[1]
+    # Set labels and annotate the three linear fits.
+    for ax, coefficient, exponent, r_metric, std_err in (
+        (ax_Cq2_si, D_single_linear, n_single_linear,
+         r_single_linear, std_err_single_linear),
+        (ax_Cq2_st, D_stretched_linear, n_stretched_linear,
+         r_stretched_linear, std_err_stretched_linear),
+        (ax_Cq2_cu, D_cumulants_linear, n_cumulants_linear,
+         r_cumulants_linear, std_err_cumulants_linear)
+    ):
+        annotate_rate_fit(
+            ax, coefficient, exponent, r_metric, std_err, model_type='linear')
 
-        # Add the slope_annotation and r_annotation in the lower-right corner
-        ax.annotate(slope_annotation, (0.98, 0.05), xycoords='axes fraction', color="black", fontsize=12, ha='right', va='bottom')
-        ax.annotate(r_annotation, (0.98, 0.10), xycoords='axes fraction', color="black", fontsize=12, ha='right', va='bottom')
+    #----- Power-law fit: C = K * q^n -----#
 
-        # Add the diff_coef_annotation in the upper-left corner
-        ax.annotate(diff_coef_annotation, (0.02, 0.95), xycoords='axes fraction', color="black", fontsize=12, ha='left', va='top')
-        
-    #---------- Fit C vs q ----------# #--Exponential--#
+    # Fit and plot the power law for each model.
+    # Keep the historical 'exponential' identifier expected by the function.
+    D_single_exponential, n_single_exponential, r_single_exponential, std_err_single_exponential = (
+        fit_and_plot_model(qualified_params["q_value_single"],
+                           qualified_params["relax_rate_single"],
+                           ax_Cq_si, qualified_params["color_single"],
+                           "Single - Power law", model_type='exponential'))
+
+    D_stretched_exponential, n_stretched_exponential, r_stretched_exponential, std_err_stretched_exponential = (
+        fit_and_plot_model(qualified_params["q_value_stretched"],
+                           qualified_params["relax_rate_stretched"],
+                           ax_Cq_st, qualified_params["color_stretched"],
+                           "Stretched - Power law", model_type='exponential'))
+
+    D_cumulants_exponential, n_cumulants_exponential, r_cumulants_exponential, std_err_cumulants_exponential = (
+        fit_and_plot_model(qualified_params["q_value_cumulants"],
+                           qualified_params["relax_rate_cumulants"],
+                           ax_Cq_cu, qualified_params["color_cumulants"],
+                           "Cumulants - Power law", model_type='exponential'))
+
+    # Set labels and annotate the three power-law fits.
+    for ax, coefficient, exponent, r_metric, std_err in (
+        (ax_Cq_si, D_single_exponential, n_single_exponential,
+         r_single_exponential, std_err_single_exponential),
+        (ax_Cq_st, D_stretched_exponential, n_stretched_exponential,
+         r_stretched_exponential, std_err_stretched_exponential),
+        (ax_Cq_cu, D_cumulants_exponential, n_cumulants_exponential,
+         r_cumulants_exponential, std_err_cumulants_exponential)
+    ):
+        annotate_rate_fit(
+            ax, coefficient, exponent, r_metric, std_err, model_type='exponential')
     
-    # Call the function to perform the fit and generate the plot for each model
-    D_single_exponential, n_single_exponential, r_single_exponential, std_err_single_exponential = fit_and_plot_model(qualified_params["q_value_single"], qualified_params["relax_rate_single"], ax_Cq_si, qualified_params["color_single"], "Single - Exponential", model_type='exponential')
-    D_stretched_exponential, n_stretched_exponential, r_stretched_exponential, std_err_stretched_exponential = fit_and_plot_model(qualified_params["q_value_stretched"], qualified_params["relax_rate_stretched"], ax_Cq_st, qualified_params["color_stretched"], 'Stretched - Exponential', model_type='exponential')
-    D_cumulants_exponential, n_cumulants_exponential, r_cumulants_exponential, std_err_cumulants_exponential = fit_and_plot_model(qualified_params["q_value_cumulants"], qualified_params["relax_rate_cumulants"], ax_Cq_cu, qualified_params["color_cumulants"], 'Cumulants - Exponential', model_type='exponential')
-    
-    # Set labels and annotations for all three models
-    for ax, D_values, n_values, r2_values in [(ax_Cq_si, D_single_exponential, n_single_exponential, r_single_exponential),
-                                               (ax_Cq_st, D_stretched_exponential, n_stretched_exponential, r_stretched_exponential),
-                                               (ax_Cq_cu, D_cumulants_exponential, n_cumulants_exponential, r_cumulants_exponential)]:
-        # Set labels
-        ax.set_xlabel("q ($\AA^{-1}$)", fontsize=14)
-        ax.set_ylabel("Relaxation Rate ($s^{-1}$)", fontsize=14)
-        ax.set_title("Relax rate vs q (Exponential Fit)", fontsize=16)
-        #ax.legend()
+    #-------------------------------------------------------------------#
+    #                        PLOT GAMMA AND PDI                         #
+    #-------------------------------------------------------------------#
 
-        # Annotate the graph with rate constant (D), exponent (n), and Coefficient of determination (R^2)
-        rate_constant_annotation = f"Rate constant = {D_values:.2e}"
-        n_annotation = f"Exponent = {n_values:.2f}"
-        r2_annotation = f"R-squared = {r2_values:.4f}"
+    #----- Gamma vs q -----#
 
-        # Get the coordinates of the graph label
-        label_x, label_y = 0.02, ax.get_ylim()[1]
+    # Plot all valid gamma values using the stored curve colors.
+    plot_params(derived_params["q_value"], derived_params["gamma"],
+                ax_gammaq, cmap, "gamma", colors=derived_params["color"])
 
-        # Add the label in the upper-left corner without a border
-        ax.annotate(rate_constant_annotation, (0.02, 0.95), xycoords='axes fraction', color="black", fontsize=12)
-        ax.annotate(n_annotation, (0.02, 0.90), xycoords='axes fraction', color="black", fontsize=12)
-        ax.annotate(r2_annotation, (0.02, 0.85), xycoords='axes fraction', color="black", fontsize=12)
+    # Set subplot labels.
+    ax_gammaq.set_xlabel(r"$q$ ($\mathrm{\AA}^{-1}$)", fontsize=14)
+    ax_gammaq.set_ylabel(r"$\gamma$", fontsize=14)
+    ax_gammaq.set_title(r"$\gamma$ vs $q$", fontsize=16)
 
-    ################################################################
-    ##################### Plot derived params  #####################
-    ################################################################
-    
-    #--------------- Plot Gamma C vs q ---------------#
-    
-    # Call the plot_params function
-    warnings.filterwarnings("ignore")
-    plot_params(derived_params["q_value"], derived_params["gamma"], ax_gammaq, cmap, "gamma")
+    # Use the same selected records and statistics as the parameter averages.
+    average_stretched_parameters = calculate_average_parameter_values(
+        parameter_averages_data, 'stretched')
+    average_gamma = average_stretched_parameters['Gamma av']
+    stdev_gamma = average_stretched_parameters['Gamma std']
 
-    # Add labels and legend
-    ax_gammaq.set_xlabel("q ($\AA^{-1}$)", fontsize=14)
-    ax_gammaq.set_ylabel("Gamma", fontsize=14)
-    ax_gammaq.set_title("Gamma vs q", fontsize=16)
-    #ax_gammaq.legend()
-    
-    # Calculate the mean and standard deviation
-    try:
-        average_gamma = mean(qualified_params["gamma"])
-        stdev_gamma = stdev(qualified_params["gamma"])
-    
-        # Add the label with the mean and standard deviation of gamma in the upper-left corner without a border
-        ax_gammaq.annotate(f"Av. Gamma = {average_gamma:.2f} ({stdev_gamma:.2f})", (0.02, 0.95), xycoords='axes fraction', color="black", fontsize=12)
-    
-    except StatisticsError:
-        pass
-    
-    #---------------- Plot PDI C vs q ----------------#
-    
-    # Call the plot_params function
-    warnings.filterwarnings("ignore")
-    plot_params(derived_params["q_value"], derived_params["PDI"], ax_PDIq, cmap, "PDI")
+    # Add the mean and population standard deviation when records are available.
+    if np.isfinite(average_gamma):
+        add_text_best_position(ax_gammaq,
+                               f"Mean gamma = {average_gamma:.3g}\n"
+                               f"SD = {stdev_gamma:.3g}",
+                               fontsize=12)
 
-    # Add labels and legend
-    ax_PDIq.set_xlabel("q ($\AA^{-1}$)", fontsize=14)
+    #----- Plot PDI vs q -----#
+
+    # Plot all valid PDI values using the stored curve colors.
+    plot_params(derived_params["q_value"], derived_params["PDI"],
+                ax_PDIq, cmap, "PDI", colors=derived_params["color"])
+
+    # Set subplot labels.
+    ax_PDIq.set_xlabel(r"$q$ ($\mathrm{\AA}^{-1}$)", fontsize=14)
     ax_PDIq.set_ylabel("PDI", fontsize=14)
-    ax_PDIq.set_title("PDI vs q", fontsize=16)
-    #ax_PDIq.legend()
+    ax_PDIq.set_title(r"PDI vs $q$", fontsize=16)
+
+    # Use the same selected records and statistics as the parameter averages.
+    average_cumulants_parameters = calculate_average_parameter_values(
+        parameter_averages_data, 'cumulants')
+    average_PDI = average_cumulants_parameters['PDI av']
+    stdev_PDI = average_cumulants_parameters['PDI std']
+
+    # Add the mean and population standard deviation when records are available.
+    if np.isfinite(average_PDI):
+        add_text_best_position(ax_PDIq,
+                               f"Mean PDI = {average_PDI:.3g}\n"
+                               f"SD = {stdev_PDI:.3g}",
+                               fontsize=12)
     
-    # Calculate the mean and standard deviation
-    try:
-        average_PDI = mean(qualified_params["PDI"])
-        stdev_PDI = stdev(qualified_params["PDI"])
-    
-        # Add the label with the mean and standard deviation of PDI in the upper-left corner without a border
-        ax_PDIq.annotate(f"Av. PDI = {average_PDI:.2f} ({stdev_PDI:.2f})", (0.02, 0.95), xycoords='axes fraction', color="black", fontsize=12)
-    
-    except StatisticsError:
-        pass
-    
-    ###############################################
-    ### Configure the subplots for the 3 models ###
-    ###############################################
-    
-    # Calculate the text position on the plot
-    diff_coef_pos = calculate_text_position(q_count)
-    
-    # Configure subplot for Single Exponential
-    configure_subplot(ax_single, "Single Exponential", "Delay Time (s)", r"$(g_2 - \mathrm{base}) / \beta$",
+    #-------------------------------------------------------------------#
+    #                  CONFIGURE CORRELATION SUBPLOTS                   #
+    #-------------------------------------------------------------------#
+
+    # Configure subplot for Single Exponential.
+    configure_subplot(ax_single, "Single Exponential", "Delay time (s)",
+                      r"$(g_2-\mathrm{baseline})/\beta$",
                       lines_labels_dict["exp_lines_single"],
                       lines_labels_dict["exp_labels_single"],
                       lines_labels_dict["fit_lines_single"],
                       lines_labels_dict["fit_labels_single"])
-    
-    # Calculate average parameter values for the 'single' model if R count is not zero
-    if parameter_averages_data['single']['R count'] > 0:
-        average_single_parameters = calculate_average_parameter_values(parameter_averages_data, 'single') 
-        
-        # Add average parameter values to Single Exponential subplot    
-        add_text_best_position(
-            ax_single, f"Av. Diff Coef ($\\mu$m$^2$/s): "f"{average_single_parameters['Diff_coef av']:.4f} "
-            f"({average_single_parameters['Diff_coef std']:.4f})",fontsize=12)
 
-    # Configure subplot for Stretched Exponential
-    configure_subplot(ax_stretched, "Stretched Exponential", "Delay Time (s)", r"$(g_2 - \mathrm{base}) / \beta$",
+    # Calculate parameter averages for the Single Exponential model.
+    average_single_parameters = calculate_average_parameter_values(
+        parameter_averages_data, 'single')
+
+    # Add the mean and standard deviation if at least one fit was included.
+    if parameter_averages_data['single']['fit_count'] > 0:
+        add_text_best_position(ax_single,
+            r"Mean $C/q^2$ ($\mu\mathrm{m}^2/\mathrm{s}$):" "\n"
+            f"{average_single_parameters['Diff_coef av']:.4g} "
+            f"({average_single_parameters['Diff_coef std']:.4g})",
+            fontsize=12)
+
+    # Configure subplot for Stretched Exponential.
+    configure_subplot(ax_stretched, "Stretched Exponential", "Delay time (s)",
+                      r"$(g_2-\mathrm{baseline})/\beta$",
                       lines_labels_dict["exp_lines_stretched"],
                       lines_labels_dict["exp_labels_stretched"],
                       lines_labels_dict["fit_lines_stretched"],
                       lines_labels_dict["fit_labels_stretched"])
-    
-    # Calculate average parameter values for the 'stretched' model if R count is not zero
-    if parameter_averages_data['stretched']['R count'] > 0:
-        average_stretched_parameters = calculate_average_parameter_values(parameter_averages_data, 'stretched')
-        
-        # Add average parameter values to Stretched Exponential subplot
-        add_text_best_position(
-            ax_stretched, f"Av. Diff Coef ($\\mu$m$^2$/s): "
-            f"{average_stretched_parameters['Diff_coef av']:.4f} "f"({average_stretched_parameters['Diff_coef std']:.4f})\n"
-            f"Av. Gamma: "
-            f"{average_stretched_parameters['Gamma av']:.4f} "f"({average_stretched_parameters['Gamma std']:.4f})",
+
+    # Reuse the averages calculated in the gamma-versus-q block.
+    # Add the mean and standard deviation if at least one fit was included.
+    if parameter_averages_data['stretched']['fit_count'] > 0:
+        add_text_best_position(ax_stretched,
+            r"Mean $C/q^2$ ($\mu\mathrm{m}^2/\mathrm{s}$): "
+            f"{average_stretched_parameters['Diff_coef av']:.4g} "
+            f"({average_stretched_parameters['Diff_coef std']:.4g})\n"
+            f"Av. Gamma: {average_stretched_parameters['Gamma av']:.4g} "
+            f"({average_stretched_parameters['Gamma std']:.4g})",
             fontsize=12)
 
-    # Configure subplot for Cumulants model
-    configure_subplot(ax_cumulants, "Cumulants", "Delay Time (s)", r"$(g_2 - \mathrm{base}) / \beta$",
+    # Configure subplot for Cumulants.
+    configure_subplot(ax_cumulants, "Cumulants", "Delay time (s)",
+                      r"$(g_2-\mathrm{baseline})/\beta$",
                       lines_labels_dict["exp_lines_cumulants"],
                       lines_labels_dict["exp_labels_cumulants"],
                       lines_labels_dict["fit_lines_cumulants"],
                       lines_labels_dict["fit_labels_cumulants"])
-    
-    # Calculate average parameter values for the 'cumulants' model if R count is not zero
-    if parameter_averages_data['cumulants']['R count'] > 0:
-        average_cumulants_parameters = calculate_average_parameter_values(parameter_averages_data, 'cumulants')
-        
-        # Add average parameter values to Cumulants subplot
-        add_text_best_position(
-            ax_cumulants, f"Av. Diff Coef ($\\mu$m$^2$/s): "
-            f"{average_cumulants_parameters['Diff_coef av']:.4f} "f"({average_cumulants_parameters['Diff_coef std']:.4f})\n"
-            f"Av. PDI: "
-            f"{average_cumulants_parameters['PDI av']:.4f} "f"({average_cumulants_parameters['PDI std']:.4f})",
+
+    # Reuse the averages calculated in the PDI-versus-q block.
+    # Add the mean and standard deviation if at least one fit was included.
+    if parameter_averages_data['cumulants']['fit_count'] > 0:
+        add_text_best_position(ax_cumulants,
+            r"Mean $C_1/q^2$ ($\mu\mathrm{m}^2/\mathrm{s}$): "
+            f"{average_cumulants_parameters['Diff_coef av']:.4g} "
+            f"({average_cumulants_parameters['Diff_coef std']:.4g})\n"
+            f"Av. PDI: {average_cumulants_parameters['PDI av']:.4g} "
+            f"({average_cumulants_parameters['PDI std']:.4g})",
             fontsize=12)
-
-    ###############################################
     
-    # Save the figures to a PDF file with two pages
+    #-------------------------------------------------------------------#
+    #                       SAVE PER-FILE OUTPUTS                       #
+    #-------------------------------------------------------------------#
+    
+    # Save a separate analysis record for this input and execution.
+    analysis_record_path = save_analysis_record(analysis_record, file_output_directory)
+
+    # Identify the same analysis on both PDF pages.
+    add_analysis_details([fig1, fig2], analysis_record)
+    
+    # Save the PDF in the main output directory.
+    # Save the two figures as separate PDF pages and close them.
     pdf_name = f"{base_name}.pdf"
-    if out_dir:
-        output_pdf_path = os.path.join(out_dir, pdf_name)
-    else:
-        output_pdf_path = os.path.join(directory, pdf_name)
+    output_pdf_path = os.path.join(output_directory, pdf_name)
+    save_figures_to_pdf([fig1, fig2], output_pdf_path)
 
-    with PdfPages(output_pdf_path) as pdf:
-        # Save the first figure and its subplots
-        pdf.savefig(fig1)
+    # Save the final DataFrame, including any q-column selection.
+    # The columns retain the numerical q order established earlier.
+    save_dataframe_to_tsv(dataset_df, output_dataframe)
 
-        # Save the second figure and its subplots
-        pdf.savefig(fig2)
+    # Write diagnostic comparisons only when enabled for Sirius 3.
+    # Disabled comparison leaves any previous comparison file unchanged.
+    if compare_with_beamline and selected_synchrotron == 'Sirius 3':
+        variations_output_path = os.path.join(
+            file_output_directory, f"{base_name}_fit_variations.dat")
+        save_fit_variations(fit_variations, variations_output_path)
 
-    # Close the figure to free up memory
-    plt.close(fig1)
-    plt.close(fig2)
-    
-    # Sort the columns of combined_df based on q values
-    dataset_df = dataset_df[['# t'] + sorted(dataset_df.columns[1:], key=lambda col_name: float(re.search(r'q=([0-9.]+)', col_name).group(1)))]
+#=======================================================================#
+#                             FINAL REPORTS                             #
+#=======================================================================#
 
-    # Save the DataFrame to a .dat file
-    dataset_df.to_csv(output_dataframe, sep='\t', index=False)
+# Print the processing summary and save the low-R^2 report.
+print_summary(counters, directory=summary_directory, r2_threshold=R2_threshold)
 
-    if selected_synchrotron == 'Sirius 3':
-        # Convert fit_variations to a DataFrame
-        variations_df = pd.DataFrame(fit_variations)
-
-        # Save the variations DF to a .dat file
-        if out_dir:
-            variations_output_path = os.path.join(out_dir, f"{base_name}_fit_variations.dat")
-        else:
-            variations_output_path = os.path.join(directory, f"{base_name}_fit_variations.dat")
-        
-        variations_df.to_csv(variations_output_path, sep='\t', index=False)
-
-plt.close()
-plt.close()
-    
-# Print the counts, filed files and invalid files
-print_summary(counters, directory=directory, r2_threshold=R2_threshold)
-
-# Generate the new .dat files with the fit results tables for each model
-generate_fit_results_tables(directory, table_data["single"], table_data["stretched"], table_data["cumulants"])
-
-
-# In[ ]:
-
-
-
+# Generate the combined fit-result tables for all processed files.
+generate_fit_results_tables(summary_directory,
+                            table_data["single"],
+                            table_data["stretched"],
+                            table_data["cumulants"])
 

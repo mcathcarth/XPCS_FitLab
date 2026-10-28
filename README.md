@@ -1,110 +1,78 @@
 # XPCS_FitLab
 
-**XPCS_FitLab** is a toolset designed for analyzing X-ray Photon Correlation Spectroscopy (XPCS) data stored in HDF5 files.
+XPCS_FitLab is a Python tool for analyzing X-ray Photon Correlation
+Spectroscopy (XPCS) data stored in HDF5 files. It reads previously calculated
+intensity autocorrelation functions, fits relaxation models and exports the
+results.
 
-The tool includes both a Jupyter notebook (`hdf5_xpcs_fitlab.ipynb`) and a Python script (`hdf5_xpcs_fitlab.py`). Both rely on the functions defined in `XPCS_functions.py`, which must be located in the same directory as the notebook or script.
-
-## Current Version
-
-**Version:** 6.8
-**Release date:** June 2026
+**Version:** 7.0
 
 ## Features
 
-* **HDF5 Data Handling**: Reads XPCS data from HDF5 files using the `h5py` library.
-* **Autocorrelation Function Fitting**: Fits precomputed (g_2(t)) functions from HDF5 files using three models:
-
-  * Single Exponential
-  * Stretched Exponential
-  * Cumulants Method
-* **Diffusion Coefficient Calculation**: Calculates diffusion coefficients using:
-
-  * Direct calculation from the relaxation rate (C).
-  * Linear fit of (C) vs (q^2).
-  * Power-law fit of (C) vs (q).
-* **Graphical Interface**:
-
-  * Select individual HDF5 files or complete directories.
-  * Define the fitting time range.
-  * Preview the selected time range when processing a single file.
-  * Select or exclude specific (q) values interactively.
-* **Output Files**:
-
-  * PDF reports with fitted curves and derived-parameter plots.
-  * `.dat` files with fitted curves and fit parameters.
-  * Summary tables for each fitting model.
-  * A report listing fits below the selected (R^2) threshold.
+- Read supported Sirius, APS and ESRF HDF5 formats.
+- Select files, the fitting time interval and, for a single file, q curves.
+- Fit single exponential, generalized exponential (stretched or compressed)
+  and cumulants models.
+- Calculate inverse rates, rate/q-squared values and relaxation-rate fits
+  as a function of q.
+- Save figures, fitted curves, parameter tables and an analysis record.
 
 ## Installation
 
-Before running **XPCS_FitLab**, make sure Python 3.8 or later is installed.
-
-Install the required Python packages with:
+Install the required packages in the Python environment used by Jupyter:
 
 ```bash
-pip install h5py numpy scipy scikit-learn matplotlib pandas
+python -m pip install h5py numpy scipy scikit-learn "matplotlib>=3.7" pandas
+python -m pip install notebook
 ```
 
-Tkinter is also required for the graphical interface. It is usually included with Python. On some Linux systems, it may need to be installed separately:
+The selection windows also require Tkinter and a local graphical session.
+On Ubuntu, install Tkinter if needed:
 
 ```bash
 sudo apt install python3-tk
 ```
 
-## Dependencies
+## Use
 
-* Python (>= 3.8)
-* h5py
-* numpy
-* scipy
-* scikit-learn
-* matplotlib
-* pandas
-* tkinter
+1. Keep `XPCS_functions.py` and `hdf5_xpcs_fitlab.ipynb` in the same directory.
+2. Open the notebook:
 
-## How to Use
+   ```bash
+   jupyter notebook hdf5_xpcs_fitlab.ipynb
+   ```
 
-### Running with Jupyter Notebook
+3. Review the `USER SETTINGS` block at the beginning of the code cell.
+4. Run the cell and follow the format, file and data-selection windows.
+5. Review the summary and exported results.
 
-1. Make sure `hdf5_xpcs_fitlab.ipynb` and `XPCS_functions.py` are located in the same directory.
-2. Open `hdf5_xpcs_fitlab.ipynb` in Jupyter Notebook or JupyterLab.
-3. Run the notebook cells and follow the graphical interface prompts.
+Restart the Jupyter kernel after replacing the functions module.
 
-### Running with Python Script
+Both time selectors support mouse dragging. Left/Right move the lower limit
+and Down/Up move the upper limit, one position at a time.
 
-1. Make sure `hdf5_xpcs_fitlab.py` and `XPCS_functions.py` are located in the same directory.
-2. Run the script from the terminal:
+The default R-squared threshold is 0.9. Fits with scores strictly above this
+threshold and finite derived values are included in parameter averages and
+global rate fits. Individual results are also saved for review.
+Two-time matrix export and comparison with stored Sirius 3 fits are optional
+and disabled by default.
 
-```bash
-python hdf5_xpcs_fitlab.py
-```
+## Outputs
 
-The graphical interface will open, allowing you to select files or directories and perform the analysis.
+For each input file, the program saves a two-page PDF and a results directory
+with correlation data, fitted curves, parameters and an analysis record.
+Combined parameter tables and the low-R-squared report are saved in a new
+`_summary/run_NNN/` directory for each execution.
 
-## Important Notes
+Results are saved in the input directory unless `out_dir` is specified.
+PDFs and other fixed-name exports are overwritten when the same input is
+analyzed again in the same output directory. Use a different `out_dir` to
+keep the results of separate runs.
 
-* The `XPCS_functions.py` file contains the functions used by both the notebook and the script.
-* The `R2_threshold` parameter defines the minimum (R^2) value required for a fit to be included in averages and diffusion-related plots.
-* Fits below the `R2_threshold` may still appear in the generated correlation-function plots and fit-results tables for diagnostic purposes.
-* Fits that converge numerically but do not pass the (R^2) threshold are listed in `below_R2_threshold_fits.dat`.
-* If there are not enough valid fits after applying the (R^2) threshold, diffusion-related plots are skipped instead of forcing invalid calculations.
-
-## Version 6.8 Updates
-
-* Added graphical time-range preview for single-file processing.
-* Improved interactive (q)-value selection:
-
-  * Curves start visible by default.
-  * Unchecked (q) values are hidden from the preview plot.
-  * Labels include colored markers matching the plotted curves.
-* Improved Tkinter window handling.
-* Replaced mixed PyQt/Tkinter file selection with a Tkinter-based selector.
-* Improved automatic legend placement in PDF reports.
-* Added automatic placement of average-parameter annotations to reduce overlap with curves and legends.
-* Corrected the exported stretched-exponential fitted curve.
-* Improved robustness when fits fail, return NaN values, or cannot be used for diffusion-related plots.
-* Added a separate report for fits below the selected (R^2) threshold.
+Input times are assumed to be in seconds and q in reciprocal angstroms.
+Interpreting the derived coefficients as diffusion coefficients requires
+the appropriate physical model and input units.
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+MIT. See `LICENSE`.
