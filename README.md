@@ -78,11 +78,19 @@ Input times are assumed to be in seconds and q in reciprocal angstroms.
 Interpreting the derived coefficients as diffusion coefficients requires
 the appropriate physical model and input units.
 
+## Documentation
+
+The English technical manual for XPCS_FitLab v7.0 is available
+[together with the archived source code on Zenodo](https://zenodo.org/records/23778879).
+
 ## Citation
 
-Citation metadata are provided in `CITATION.cff`; GitHub shows them under
-"Cite this repository". Version 6.7 is archived on Zenodo:
-https://doi.org/10.5281/zenodo.13835703
+If you use XPCS_FitLab, please cite the version used in your analysis.
+The citation for version 7.0 is available on
+[Zenodo](https://zenodo.org/records/23778879).
+
+Citation metadata are also provided in `CITATION.cff` and displayed
+by GitHub under "Cite this repository".
 
 ## License
 
