@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using these metadata."
+title: "XPCS_FitLab"
+type: software
+authors:
+  - family-names: Cathcarth
+    given-names: Marilina
+    orcid: "https://orcid.org/0000-0002-1062-0954"
+    affiliation: "INIFTA, UNLP-CONICET"
+  - family-names: Picco
+    given-names: Agustín S.
+    orcid: "https://orcid.org/0000-0003-4683-7319"
+    affiliation: "INIFTA, UNLP-CONICET"
+version: "7.0"
+date-released: "2026-10-28"
+license: MIT
+repository-code: "https://github.com/mcathcarth/XPCS_FitLab"
+abstract: "Python tool for fitting previously calculated XPCS intensity autocorrelation functions stored in HDF5 files."
+keywords:
+  - XPCS
+  - HDF5
+  - relaxation fits

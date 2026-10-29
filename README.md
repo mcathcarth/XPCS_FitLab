@@ -22,8 +22,8 @@ results.
 Install the required packages in the Python environment used by Jupyter:
 
 ```bash
-python -m pip install h5py numpy scipy scikit-learn "matplotlib>=3.7" pandas
-python -m pip install notebook
+python3 -m pip install h5py numpy scipy scikit-learn "matplotlib>=3.7" pandas
+python3 -m pip install notebook
 ```
 
 The selection windows also require Tkinter and a local graphical session.
@@ -32,6 +32,8 @@ On Ubuntu, install Tkinter if needed:
 ```bash
 sudo apt install python3-tk
 ```
+
+To check Tkinter, run `python3 -m tkinter`; a small test window should appear.
 
 ## Use
 
@@ -47,6 +49,9 @@ sudo apt install python3-tk
 5. Review the summary and exported results.
 
 Restart the Jupyter kernel after replacing the functions module.
+
+`hdf5_xpcs_fitlab.py` contains the same code as the notebook, exported with
+`jupyter nbconvert --to script`. The notebook is the documented entry point.
 
 Both time selectors support mouse dragging. Left/Right move the lower limit
 and Down/Up move the upper limit, one position at a time.
@@ -72,6 +77,12 @@ keep the results of separate runs.
 Input times are assumed to be in seconds and q in reciprocal angstroms.
 Interpreting the derived coefficients as diffusion coefficients requires
 the appropriate physical model and input units.
+
+## Citation
+
+Citation metadata are provided in `CITATION.cff`; GitHub shows them under
+"Cite this repository". Version 6.7 is archived on Zenodo:
+https://doi.org/10.5281/zenodo.13835703
 
 ## License
 
